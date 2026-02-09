@@ -10,12 +10,14 @@ jobs:
 
       - name: Recombine and Unzip
         run: |
-          # Sabhi parts ko jod kar asli zip banana
+          # Sabhi parts ko jodo
           cat hook_part_* > hook.zip
-          unzip hook.zip
-          # Files ko rename karna (Just in case)
-          mv *.so libil2cpp.so 2>/dev/null || true
-          mv *.dat global-metadata.dat 2>/dev/null || true
+          # Unzip karo aur files ko current folder mein force move karo
+          unzip -o hook.zip
+          find . -name "libil2cpp.so" -exec mv {} . \;
+          find . -name "global-metadata.dat" -exec mv {} . \;
+          # Check karne ke liye ki files asli hain (size dikhayega)
+          ls -lh libil2cpp.so global-metadata.dat
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -24,12 +26,16 @@ jobs:
 
       - name: Run Dumper
         run: |
+          # Dumper download aur setup
           wget -q https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.40/Il2CppDumper-v6.7.40.zip
           unzip -q Il2CppDumper-v6.7.40.zip
           chmod +x Il2CppDumper
-          ./Il2CppDumper libil2cpp.so global-metadata.dat ./Output
-
+          
+          # Dumper ko run karna (Explicitly files specify karke)
+          ./Il2CppDumper libil2cpp.so global-metadata.dat ./Output || echo "Dumper failed but checking why..."
+          
       - name: Upload DLLs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Extracted-DLLs
