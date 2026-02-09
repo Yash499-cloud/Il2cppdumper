@@ -10,13 +10,11 @@ jobs:
 
       - name: Recombine and Unzip
         run: |
-          # Sabhi parts ko jodo
           cat hook_part_* > hook.zip
-          # Unzip karo aur files ko current folder mein force move karo
           unzip -o hook.zip
           find . -name "libil2cpp.so" -exec mv {} . \;
           find . -name "global-metadata.dat" -exec mv {} . \;
-          # Check karne ke liye ki files asli hain (size dikhayega)
+          echo "Checking file sizes..."
           ls -lh libil2cpp.so global-metadata.dat
 
       - name: Setup .NET
@@ -26,17 +24,24 @@ jobs:
 
       - name: Run Dumper
         run: |
-          # Dumper download aur setup
           wget -q https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.40/Il2CppDumper-v6.7.40.zip
           unzip -q Il2CppDumper-v6.7.40.zip
           chmod +x Il2CppDumper
+          # Dumper ko manual input bypass ke saath chalana
+          echo -e "\n" | ./Il2CppDumper libil2cpp.so global-metadata.dat ./Output || true
           
-          # Dumper ko run karna (Explicitly files specify karke)
-          ./Il2CppDumper libil2cpp.so global-metadata.dat ./Output || echo "Dumper failed but checking why..."
-          
+      - name: Check Output Folder
+        run: |
+          if [ -d "./Output/DummyDll" ]; then
+            echo "Success: DLLs generated!"
+            ls ./Output/DummyDll | head -n 10
+          else
+            echo "Error: Output folder not found. Check Dumper logs above."
+          fi
+
       - name: Upload DLLs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Extracted-DLLs
-          path: ./Output/DummyDll/
+          path: ./Output/
