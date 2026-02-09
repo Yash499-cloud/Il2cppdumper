@@ -8,38 +8,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Recombine and Unzip
+      - name: Recombine Assets
         run: |
           cat hook_part_* > hook.zip
           unzip -o hook.zip
           find . -name "libil2cpp.so" -exec mv {} . \;
           find . -name "global-metadata.dat" -exec mv {} . \;
-          echo "Checking file sizes..."
-          ls -lh libil2cpp.so global-metadata.dat
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '6.0.x'
 
-      - name: Run Dumper
+      - name: Run Dumper (EXE Mode)
         run: |
+          # Dumper download (Hum zip version uthayenge jisme EXE ho)
           wget -q https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.40/Il2CppDumper-v6.7.40.zip
-          unzip -q Il2CppDumper-v6.7.40.zip
-          chmod +x Il2CppDumper
-          # Dumper ko manual input bypass ke saath chalana
-          echo -e "\n" | ./Il2CppDumper libil2cpp.so global-metadata.dat ./Output || true
+          unzip -o Il2CppDumper-v6.7.40.zip
           
-      - name: Check Output Folder
-        run: |
-          if [ -d "./Output/DummyDll" ]; then
-            echo "Success: DLLs generated!"
-            ls ./Output/DummyDll | head -n 10
-          else
-            echo "Error: Output folder not found. Check Dumper logs above."
-          fi
-
-      - name: Upload DLLs
+          # Dotnet ke zariye EXE chalana (Sabse stable method)
+          # 'echo -e' commands auto-input ke liye hain agar dumper kuch pooche
+          echo -e "\n" | dotnet Il2CppDumper.dll libil2cpp.so global-metadata.dat ./Output
+          
+      - name: Upload Results
         if: always()
         uses: actions/upload-artifact@v4
         with:
