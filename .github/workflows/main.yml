@@ -1,0 +1,36 @@
+name: Extract DLLs
+on: [push, workflow_dispatch]
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Recombine and Unzip
+        run: |
+          # Sabhi parts ko jod kar asli zip banana
+          cat hook_part_* > hook.zip
+          unzip hook.zip
+          # Files ko rename karna (Just in case)
+          mv *.so libil2cpp.so 2>/dev/null || true
+          mv *.dat global-metadata.dat 2>/dev/null || true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Run Dumper
+        run: |
+          wget -q https://github.com/Perfare/Il2CppDumper/releases/download/v6.7.40/Il2CppDumper-v6.7.40.zip
+          unzip -q Il2CppDumper-v6.7.40.zip
+          chmod +x Il2CppDumper
+          ./Il2CppDumper libil2cpp.so global-metadata.dat ./Output
+
+      - name: Upload DLLs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Extracted-DLLs
+          path: ./Output/DummyDll/
