@@ -1,4 +1,4 @@
-name: Recovery Build Final Fix
+name: Recovery Build Final Nuclear Strike
 
 on:
   workflow_dispatch:
@@ -28,31 +28,64 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup & Fix Device Tree
+      - name: Setup & Nuclear Overwrite Device Tree
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/$CLEAN_NAME
+          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/$CLEAN_NAME || true
           
           cd device/tecno/$CLEAN_NAME
 
-          # Fix line endings and paths
-          find . -type f -name "*.mk" -exec sed -i 's/\r//' {} +
-          find . -type f -name "*.mk" -exec sed -i 's/vendor\/omni/vendor\/twrp/g' {} +
+          # 1. Total Wipeout of problematic files
+          rm -f device.mk AndroidProducts.mk omni_$CLEAN_NAME.mk vendorsetup.sh
 
-          # BoardConfig: Ninja ko target dikhane ke liye
+          # 2. Re-creating device.mk (Super Minimal)
+          cat <<EOF > device.mk
+          LOCAL_PATH := device/tecno/$CLEAN_NAME
+          PRODUCT_COPY_FILES += \\
+              \$(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab
+          EOF
+
+          # 3. Re-creating omni_TECNO_KI8.mk (The Core Makefile)
+          cat <<EOF > omni_$CLEAN_NAME.mk
+          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)
+          \$(call inherit-product, vendor/twrp/config/common.mk)
+          \$(call inherit-product, \$(LOCAL_PATH)/device.mk)
+
+          PRODUCT_DEVICE := $CLEAN_NAME
+          PRODUCT_NAME := omni_$CLEAN_NAME
+          PRODUCT_BRAND := Tecno
+          PRODUCT_MODEL := $CLEAN_NAME
+          PRODUCT_MANUFACTURER := Tecno
+          EOF
+
+          # 4. Re-creating AndroidProducts.mk
+          cat <<EOF > AndroidProducts.mk
+          PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
+          COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
+          EOF
+
+          # 5. Re-creating vendorsetup.sh
+          echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
+
+          # 6. Injecting BoardConfig with Force
+          sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' BoardConfig.mk
           {
+            echo "TARGET_ARCH := arm64"
             echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600"
             echo "BOARD_FLASH_BLOCK_SIZE := 131072"
             echo "ALLOW_MISSING_DEPENDENCIES := true"
             echo "BUILD_BROKEN_DUP_RULES := true"
-            echo "TARGET_USES_64_BIT_BINDER := true"
+            echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
+            echo "BUILD_BROKEN_MISSING_REQUIRED_MODULES := true"
           } >> BoardConfig.mk
 
-      - name: Build Recovery (The Force Mode)
+      - name: Build Recovery (Force Target)
         run: |
           cd ~/fox
-          # RAM Fix: Adding 4GB Swap
+          # Fix Swap "Text file busy"
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
           sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
           
           source build/envsetup.sh
@@ -61,9 +94,8 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES=true
           lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
-          # 'make clean' HATA DIYA HAI - Ab Ninja direct kaam karega
-          # mka use karo jo dependencies ko force karta hai
-          mka recoveryimage -j$(nproc --all)
+          # Target build
+          make recoveryimage -j$(nproc --all)
 
       - name: Collect Artifacts
         if: always()
@@ -78,6 +110,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Recovery-Final-Output
+          name: Recovery-Final-Nuclear
           path: ~/outputs/*
           
