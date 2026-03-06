@@ -8,9 +8,7 @@ env:
   MANIFEST_BRANCH: "twrp-12.1"
   DEVICE_TREE_URL: "https://github.com/Yash499-cloud/Il2cppdumper"
   DEVICE_TREE_BRANCH: "main"
-  DEVICE_PATH: "device/tecno/TECNO-KI8"
-  DEVICE_NAME: "TECNO_KI8" # Dash ko underscore se badla
-  MAKEFILE_NAME: "omni_TECNO_KI8"
+  DEVICE_NAME: "TECNO_KI8"
   BUILD_TARGET: "recovery"
 
 jobs:
@@ -43,89 +41,34 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Clone Device Tree
+      - name: Smart Clone and Fix
         run: |
           cd ~/fox
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} ${{ env.DEVICE_PATH }}
-
-      - name: Fix Device Tree Files
-        run: |
-          cd ~/fox/${{ env.DEVICE_PATH }}
-          # Rename files to remove problematic dash
-          mv omni_TECNO-KI8.mk omni_TECNO_KI8.mk || true
-          # Replace all dashes with underscores in the makefiles
-          sed -i 's/TECNO-KI8/TECNO_KI8/g' AndroidProducts.mk || true
-          sed -i 's/TECNO-KI8/TECNO_KI8/g' omni_TECNO_KI8.mk || true
-          sed -i 's/TECNO-KI8/TECNO_KI8/g' vendorsetup.sh || true
-
-      - name: Build
-        run: |
-          cd ~/fox
-          export ALLOW_MISSING_DEPENDENCIES=true
-          source build/envsetup.sh
-          lunch ${{ env.MAKEFILE_NAME }}-userdebug
-          mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
-
-      - name: Upload Result
-        uses: actions/upload-artifact@v4
-        with:
-          name: Recovery-Image
-          path: /home/runner/fox/out/target/product/TECNO_KI8/recovery.img
+          # Device tree ko temporary folder mein clone karo
+          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/temp_device
           
-      - name: Sync Source
-        run: |
-          git config --global user.email "gh-actions@github.com"
-          git config --global user.name "GitHub Actions"
-          mkdir -p ~/fox && cd ~/fox
-          repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
-          repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
-
-      - name: Clone Device Tree
-        run: |
-          cd ~/fox
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} ${{ env.DEVICE_PATH }}
-
-      - name: Fix Device Tree Errors
-        run: |
-          cd ~/fox/${{ env.DEVICE_PATH }}
-          # Fix common naming issues in AndroidProducts.mk
-          sed -i 's/omni_TECNO-KI8-user/omni_TECNO-KI8-userdebug/g' AndroidProducts.mk || true
-          sed -i 's/omni_TECNO-KI8-eng/omni_TECNO-KI8-userdebug/g' AndroidProducts.mk || true
-
-      - name: Build
-        run: |
-          cd ~/fox
-          export ALLOW_MISSING_DEPENDENCIES=true
-          source build/envsetup.sh
-          # Hum direct 'lunch' command manually denge variant ke sath
-          lunch ${{ env.MAKEFILE_NAME }}-userdebug
-          mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
-
-      - name: Upload Result
-        uses: actions/upload-artifact@v4
-        with:
-          name: Recovery-Image
-          path: /home/runner/fox/out/target/product/${{ env.DEVICE_NAME }}/recovery.img
+          # Folder ke andar jo bhi folder hai (TECNO-KI8 ya kuch aur), use detect karo
+          REAL_FOLDER=$(ls device/tecno/temp_device | head -n 1)
           
-      - name: Sync Source
-        run: |
-          git config --global user.email "gh-actions@github.com"
-          git config --global user.name "GitHub Actions"
-          mkdir -p ~/fox && cd ~/fox
-          repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
-          repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
-
-      - name: Clone Device Tree
-        run: |
-          cd ~/fox
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} ${{ env.DEVICE_PATH }}
+          # Agar direct files hain (folder nahi), toh temp_device hi asli folder hai
+          if [ -f "device/tecno/temp_device/AndroidProducts.mk" ]; then
+             mv device/tecno/temp_device device/tecno/${{ env.DEVICE_NAME }}
+          else
+             mv device/tecno/temp_device/$REAL_FOLDER device/tecno/${{ env.DEVICE_NAME }}
+          fi
+          
+          # Ab files ko rename aur paths ko fix karo (Automatically)
+          cd device/tecno/${{ env.DEVICE_NAME }}
+          find . -name "omni_*.mk" -exec mv {} omni_${{ env.DEVICE_NAME }}.mk \; || true
+          find . -type f -exec sed -i "s/TECNO-KI8/${{ env.DEVICE_NAME }}/g" {} +
+          find . -type f -exec sed -i "s/omni_TECNO-KI8/omni_${{ env.DEVICE_NAME }}/g" {} +
 
       - name: Build
         run: |
           cd ~/fox
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
-          lunch ${{ env.MAKEFILE_NAME }}-eng
+          lunch omni_${{ env.DEVICE_NAME }}-userdebug
           mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
 
       - name: Upload Result
