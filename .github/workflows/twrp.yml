@@ -1,4 +1,4 @@
-name: Recovery Build Self-Healing Final
+name: Recovery Build Final Nuclear Fix
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup & Self-Heal Device Tree
+      - name: Setup & Nuclear Overwrite Device Tree
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
@@ -36,68 +36,61 @@ jobs:
           
           cd device/tecno/$CLEAN_NAME
 
-          # Healer 1: Windows line endings & Path sanitization
-          find . -type f -name "*.mk" -exec sed -i 's/\r//' {} +
-          find . -type f -name "*.mk" -exec sed -i 's/vendor\/omni/vendor\/twrp/g' {} +
-          
-          # Healer 2: Remove Obsolete Flags from ALL files
-          find . -type f -name "*.mk" -exec sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' {} +
-          find . -type f -name "*.mk" -exec sed -i '/add_lunch_combo/d' {} +
+          # 1. DELETE and REWRITE device.mk (Destroying the 'missing separator' ghost)
+          rm -f device.mk
+          cat <<EOF > device.mk
+          LOCAL_PATH := device/tecno/$CLEAN_NAME
+          PRODUCT_COPY_FILES += \\
+              \$(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab
+          EOF
 
-          # Healer 3: Fix AndroidProducts.mk (Standard Format)
+          # 2. Fix omni_TECNO_KI8.mk (Deep Sanitization)
+          # Isme se purane paths aur obsolete flags ko chun chun ke safaya
+          sed -i 's/\r//' omni_$CLEAN_NAME.mk
+          sed -i 's/vendor\/omni/vendor\/twrp/g' omni_$CLEAN_NAME.mk
+          sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' omni_$CLEAN_NAME.mk
+
+          # 3. AndroidProducts.mk (Fresh Start)
+          rm -f AndroidProducts.mk
           cat <<EOF > AndroidProducts.mk
           PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
           COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
           EOF
 
-          # Healer 4: Vendorsetup (Clean)
+          # 4. Vendorsetup (Clean)
           echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
           
-          # Healer 5: BoardConfig Force Architecture
+          # 5. Force BoardConfig Flags to bypass common errors
           {
             echo "TARGET_ARCH := arm64"
-            echo "TARGET_ARCH_VARIANT := armv8-a"
-            echo "TARGET_CPU_VARIANT := generic"
-            echo "TARGET_2ND_ARCH := arm"
             echo "TARGET_SUPPORTS_64_BIT_APPS := true"
             echo "BUILD_BROKEN_DUP_RULES := true"
             echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
             echo "ALLOW_MISSING_DEPENDENCIES := true"
           } >> BoardConfig.mk
 
-      - name: Build Recovery (Force Mode)
+      - name: Build Recovery (The Final Push)
         run: |
           cd ~/fox
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           
+          # Standard Android Lunch
           lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
-          # Ninja Bypass: Clear intermediates to force rebuild
-          rm -rf out/target/product/$CLEAN_NAME/obj/PACKAGING/recovery_patch_intermediates
-          
-          # Main Build Command
+          # Force clean and build
           make clean
           make recoveryimage -j$(nproc --all)
 
-      - name: Deep Search & Collect Artifacts
+      - name: Collect & Verify Artifacts
         if: always()
         run: |
-          cd ~/fox
-          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           mkdir -p ~/outputs
-          
-          # Standard Folder Check
-          cp out/target/product/$CLEAN_NAME/recovery.img ~/outputs/ 2>/dev/null || echo "Standard path failed"
-          
-          # Deep Search (Agar standard path fail ho jaye)
-          echo "Scanning for recovery.img..."
-          find out/ -name "recovery.img" -exec cp {} ~/outputs/ \;
-          find out/ -name "OrangeFox*.zip" -exec cp {} ~/outputs/ \;
-          find out/ -name "twrp*.img" -exec cp {} ~/outputs/ \;
-          
-          # List files for debugging
+          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
+          # Deep scanning the 'out' directory for any generated images/zips
+          find ~/fox/out/target/product/$CLEAN_NAME/ -name "recovery.img" -exec cp {} ~/outputs/ \;
+          find ~/fox/out/target/product/$CLEAN_NAME/ -name "*.zip" -exec cp {} ~/outputs/ \;
           ls -R ~/outputs/
 
       - name: Upload Artifact
