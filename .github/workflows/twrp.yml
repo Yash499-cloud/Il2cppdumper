@@ -44,22 +44,24 @@ jobs:
       - name: Smart Clone and Fix
         run: |
           cd ~/fox
-          # Device tree ko temporary folder mein clone karo
           git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/temp_device
           
-          # Folder ke andar jo bhi folder hai (TECNO-KI8 ya kuch aur), use detect karo
-          REAL_FOLDER=$(ls device/tecno/temp_device | head -n 1)
-          
-          # Agar direct files hain (folder nahi), toh temp_device hi asli folder hai
+          # Folder detection logic
           if [ -f "device/tecno/temp_device/AndroidProducts.mk" ]; then
              mv device/tecno/temp_device device/tecno/${{ env.DEVICE_NAME }}
           else
+             REAL_FOLDER=$(ls device/tecno/temp_device | head -n 1)
              mv device/tecno/temp_device/$REAL_FOLDER device/tecno/${{ env.DEVICE_NAME }}
           fi
           
-          # Ab files ko rename aur paths ko fix karo (Automatically)
+          # Fix Obsolete Errors and Paths
           cd device/tecno/${{ env.DEVICE_NAME }}
           find . -name "omni_*.mk" -exec mv {} omni_${{ env.DEVICE_NAME }}.mk \; || true
+          
+          # Delete the line causing the error (PRODUCT_STATIC_BOOT_CONTROL_HAL)
+          sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk || true
+          
+          # Global Replace and Cleanup
           find . -type f -exec sed -i "s/TECNO-KI8/${{ env.DEVICE_NAME }}/g" {} +
           find . -type f -exec sed -i "s/omni_TECNO-KI8/omni_${{ env.DEVICE_NAME }}/g" {} +
 
