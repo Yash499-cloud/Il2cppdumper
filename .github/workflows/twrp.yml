@@ -1,4 +1,4 @@
-name: Recovery Build Ninja-Targeted
+name: Recovery Build Final Fix
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup & Satisfy Ninja (Fixing Tree)
+      - name: Setup & Fix Device Tree
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
@@ -36,69 +36,48 @@ jobs:
           
           cd device/tecno/$CLEAN_NAME
 
-          # 1. Sabhi files se Windows endings hatao (Essential for Ninja)
-          find . -type f -exec sed -i 's/\r//' {} +
-
-          # 2. Overwrite device.mk & AndroidProducts (Pure and Clean)
-          rm -f device.mk AndroidProducts.mk
-          echo "LOCAL_PATH := device/tecno/$CLEAN_NAME" > device.mk
-          echo 'PRODUCT_COPY_FILES += $(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab' >> device.mk
-          
-          cat <<EOF > AndroidProducts.mk
-          PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
-          COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
-          EOF
-
-          # 3. Path Correction (Omni -> TWRP)
+          # Fix line endings and paths
+          find . -type f -name "*.mk" -exec sed -i 's/\r//' {} +
           find . -type f -name "*.mk" -exec sed -i 's/vendor\/omni/vendor\/twrp/g' {} +
 
-          # 4. BoardConfig: Ninja's Main Meal
-          # Yahan hum wo variables de rahe hain jo Ninja dhoond raha hai
+          # BoardConfig: Ninja ko target dikhane ke liye
           {
-            echo "TARGET_ARCH := arm64"
-            echo "TARGET_ARCH_VARIANT := armv8-a"
-            echo "TARGET_CPU_VARIANT := generic"
-            echo "TARGET_2ND_ARCH := arm"
-            echo "TARGET_2ND_ARCH_VARIANT := armv7-a-neon"
-            echo "TARGET_2ND_CPU_VARIANT := generic"
-            echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600" # 100MB (Safe bet)
+            echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600"
             echo "BOARD_FLASH_BLOCK_SIZE := 131072"
-            echo "BOARD_HAS_NO_REAL_SDCARD := true"
-            echo "TARGET_USERIMAGES_USE_EXT4 := true"
-            echo "RECOVERY_SDCARD_ON_DATA := true"
             echo "ALLOW_MISSING_DEPENDENCIES := true"
+            echo "BUILD_BROKEN_DUP_RULES := true"
+            echo "TARGET_USES_64_BIT_BINDER := true"
           } >> BoardConfig.mk
 
-      - name: Build Recovery (Direct Target)
+      - name: Build Recovery (The Force Mode)
         run: |
           cd ~/fox
-          export ALLOW_MISSING_DEPENDENCIES=true
+          # RAM Fix: Adding 4GB Swap
+          sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          
           source build/envsetup.sh
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           
+          export ALLOW_MISSING_DEPENDENCIES=true
           lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
-          # Force Ninja to start from scratch
-          make clean
-          
-          # Ninja ko direct target pakdao
-          make recoveryimage -j$(nproc --all)
+          # 'make clean' HATA DIYA HAI - Ab Ninja direct kaam karega
+          # mka use karo jo dependencies ko force karta hai
+          mka recoveryimage -j$(nproc --all)
 
-      - name: Extract Artifacts
+      - name: Collect Artifacts
         if: always()
         run: |
           mkdir -p ~/outputs
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
-          # Deep search for the image
           find ~/fox/out/target/product/$CLEAN_NAME/ -name "recovery.img" -exec cp {} ~/outputs/ \;
           find ~/fox/out/target/product/$CLEAN_NAME/ -name "*.zip" -exec cp {} ~/outputs/ \;
-          # Agar files mil gayi toh list karke dikhao
           ls -R ~/outputs/
 
       - name: Upload Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Recovery-Ninja-Satisfied
+          name: Recovery-Final-Output
           path: ~/outputs/*
           
