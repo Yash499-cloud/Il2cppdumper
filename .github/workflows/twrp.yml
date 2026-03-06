@@ -1,4 +1,4 @@
-name: Recovery Build Final Beast Mode
+name: Recovery Build FINAL EMERGENCY FIX
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup & Fix Device Tree
+      - name: Force Fix Device Tree
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
@@ -36,64 +36,61 @@ jobs:
           
           cd device/tecno/$CLEAN_NAME
 
-          # Obsolete flags aur 32-bit errors ko jad se khatam karo
-          find . -type f -name "*.mk" -exec sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' {} +
-          find . -type f -name "*.mk" -exec sed -i '/add_lunch_combo/d' {} +
-          find . -type f -name "*.mk" -exec sed -i 's/vendor\/omni/vendor\/twrp/g' {} +
+          # Sab delete karo jo error de raha hai
+          rm -f device.mk AndroidProducts.mk vendorsetup.sh omni_$CLEAN_NAME.mk
 
-          # OrangeFox specific: Ensure AndroidProducts.mk is correct
-          rm -f AndroidProducts.mk
-          cat <<EOF > AndroidProducts.mk
-          PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
-          COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
+          # Naya Clean device.mk
+          echo "LOCAL_PATH := device/tecno/$CLEAN_NAME" > device.mk
+          echo "PRODUCT_COPY_FILES += \$(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab" >> device.mk
+
+          # Naya Clean AndroidProducts.mk
+          echo "PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk" > AndroidProducts.mk
+          echo "COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug" >> AndroidProducts.mk
+
+          # Naya Clean omni_TECNO_KI8.mk
+          cat <<EOF > omni_$CLEAN_NAME.mk
+          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)
+          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)
+          \$(call inherit-product, vendor/twrp/config/common.mk)
+          \$(call inherit-product, \$(LOCAL_PATH)/device.mk)
+          PRODUCT_DEVICE := $CLEAN_NAME
+          PRODUCT_NAME := omni_$CLEAN_NAME
+          PRODUCT_BRAND := Tecno
+          PRODUCT_MODEL := $CLEAN_NAME
+          PRODUCT_MANUFACTURER := Tecno
           EOF
 
-          # BoardConfig: Inject essential Ninja targets
-          {
-            echo "TARGET_IS_64_BIT := true"
-            echo "TARGET_SUPPORTS_64_BIT_APPS := true"
-            echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600"
-            echo "BOARD_FLASH_BLOCK_SIZE := 131072"
-            echo "ALLOW_MISSING_DEPENDENCIES := true"
-            echo "BUILD_BROKEN_DUP_RULES := true"
-            echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
-          } >> BoardConfig.mk
+          # BoardConfig Fix
+          sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' BoardConfig.mk
+          echo "TARGET_SUPPORTS_64_BIT_APPS := true" >> BoardConfig.mk
+          echo "ALLOW_MISSING_DEPENDENCIES := true" >> BoardConfig.mk
 
-      - name: Build Recovery (Force Ninja to Work)
+      - name: Build Recovery
         run: |
           cd ~/fox
-          # RAM Fix
           sudo swapoff -a || true
-          sudo rm -f /swapfile
           sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
           
           source build/envsetup.sh
-          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
+          CLEAN_NAME=$(echo "TECNO_KI8" | sed 's/-/_/g')
           
           export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-          
-          # Lunch
           lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
-          # Ninja ko "Work" dene ke liye hum 'mka' use karenge jo TWRP/OrangeFox ka preferred hai
-          # Agar 'no work' bole toh 'make recoveryimage' ki jagah seedha module target karenge
-          mka recoveryimage -j$(nproc --all)
+          # Force Ninja to build recovery
+          make recoveryimage -j$(nproc --all)
 
-      - name: Collect Artifacts
+      - name: Collect & Upload
         if: always()
         run: |
           mkdir -p ~/outputs
-          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
-          # Find anything that looks like a recovery image or zip
-          find out/target/product/$CLEAN_NAME/ -name "recovery.img" -exec cp {} ~/outputs/ \;
-          find out/target/product/$CLEAN_NAME/ -name "OrangeFox*.zip" -exec cp {} ~/outputs/ \;
+          find ~/fox/out/target/product/ -name "recovery.img" -exec cp {} ~/outputs/ \;
           ls -R ~/outputs/
-
+          
       - name: Upload Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Recovery-Built-Image
+          name: Recovery-Final-Result
           path: ~/outputs/*
           
