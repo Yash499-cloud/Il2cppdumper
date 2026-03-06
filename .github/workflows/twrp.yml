@@ -1,4 +1,4 @@
-name: Recovery Build Final Nuclear Strike
+name: Recovery Build 64Bit-Final-Strike
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup & Nuclear Overwrite Device Tree
+      - name: Setup & Overwrite Device Tree (64-Bit Fix)
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
@@ -36,18 +36,19 @@ jobs:
           
           cd device/tecno/$CLEAN_NAME
 
-          # 1. Total Wipeout of problematic files
+          # 1. Sab kachra saaf
           rm -f device.mk AndroidProducts.mk omni_$CLEAN_NAME.mk vendorsetup.sh
 
-          # 2. Re-creating device.mk (Super Minimal)
+          # 2. Minimal device.mk
           cat <<EOF > device.mk
           LOCAL_PATH := device/tecno/$CLEAN_NAME
           PRODUCT_COPY_FILES += \\
               \$(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab
           EOF
 
-          # 3. Re-creating omni_TECNO_KI8.mk (The Core Makefile)
+          # 3. omni_TECNO_KI8.mk (64-bit flags added)
           cat <<EOF > omni_$CLEAN_NAME.mk
+          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)
           \$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)
           \$(call inherit-product, vendor/twrp/config/common.mk)
           \$(call inherit-product, \$(LOCAL_PATH)/device.mk)
@@ -59,31 +60,32 @@ jobs:
           PRODUCT_MANUFACTURER := Tecno
           EOF
 
-          # 4. Re-creating AndroidProducts.mk
+          # 4. AndroidProducts.mk
           cat <<EOF > AndroidProducts.mk
           PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
           COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
           EOF
 
-          # 5. Re-creating vendorsetup.sh
-          echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
-
-          # 6. Injecting BoardConfig with Force
+          # 5. Fix BoardConfig (The 64-bit Savior)
           sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' BoardConfig.mk
           {
             echo "TARGET_ARCH := arm64"
+            echo "TARGET_ARCH_VARIANT := armv8-a"
+            echo "TARGET_CPU_VARIANT := generic"
+            echo "TARGET_2ND_ARCH := arm"
+            echo "TARGET_2ND_ARCH_VARIANT := armv7-a-neon"
+            echo "TARGET_2ND_CPU_VARIANT := generic"
+            echo "TARGET_SUPPORTS_64_BIT_APPS := true"
             echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 104857600"
             echo "BOARD_FLASH_BLOCK_SIZE := 131072"
             echo "ALLOW_MISSING_DEPENDENCIES := true"
             echo "BUILD_BROKEN_DUP_RULES := true"
             echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
-            echo "BUILD_BROKEN_MISSING_REQUIRED_MODULES := true"
           } >> BoardConfig.mk
 
-      - name: Build Recovery (Force Target)
+      - name: Build Recovery
         run: |
           cd ~/fox
-          # Fix Swap "Text file busy"
           sudo swapoff -a || true
           sudo rm -f /swapfile
           sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
@@ -94,7 +96,6 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES=true
           lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
-          # Target build
           make recoveryimage -j$(nproc --all)
 
       - name: Collect Artifacts
@@ -103,13 +104,12 @@ jobs:
           mkdir -p ~/outputs
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           find ~/fox/out/target/product/$CLEAN_NAME/ -name "recovery.img" -exec cp {} ~/outputs/ \;
-          find ~/fox/out/target/product/$CLEAN_NAME/ -name "*.zip" -exec cp {} ~/outputs/ \;
           ls -R ~/outputs/
 
       - name: Upload Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Recovery-Final-Nuclear
+          name: Recovery-64Bit-Built
           path: ~/outputs/*
           
