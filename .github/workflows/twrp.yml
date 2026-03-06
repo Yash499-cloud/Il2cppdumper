@@ -30,7 +30,7 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup Device Tree (Fixing device.mk:24)
+      - name: Setup Device Tree (Fixing missing separator)
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
@@ -38,37 +38,44 @@ jobs:
           
           cd device/tecno/$CLEAN_NAME
           
-          # 1. Obsolete flag ko poore folder se delete karo (device.mk fix)
-          find . -type f -exec sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' {} +
+          # 1. Sabhi .mk files se "PRODUCT_STATIC_BOOT_CONTROL_HAL" wali lines hatao
+          # Aur check karo ki koi empty/corrupt line na bache
+          find . -name "*.mk" -exec sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' {} +
           
-          # 2. Architecture aur Broken Rules fix
-          echo "TARGET_SUPPORTS_64_BIT_APPS := true" >> BoardConfig.mk
-          echo "BUILD_BROKEN_DUP_RULES := true" >> BoardConfig.mk
-          echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true" >> BoardConfig.mk
+          # 2. device.mk ki line 24 ka gussa thanda karne ke liye file ko 'trim' karo
+          # Taki koi 'missing separator' ya hidden character na rahe
+          sed -i 's/[[:space:]]*$//' device.mk
+          
+          # 3. Architecture aur Broken Rules fix
+          {
+            echo "TARGET_SUPPORTS_64_BIT_APPS := true"
+            echo "BUILD_BROKEN_DUP_RULES := true"
+            echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
+            echo "ALLOW_MISSING_DEPENDENCIES := true"
+          } >> BoardConfig.mk
 
-          # 3. AndroidProducts.mk ko clean karo
+          # 4. AndroidProducts.mk (Standard Format)
           cat <<EOF > AndroidProducts.mk
           PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
           COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
           EOF
 
-          # 4. vendorsetup.sh
+          # 5. vendorsetup.sh
           echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
 
-      - name: Build Recovery (Force Compile)
+      - name: Build Recovery
         run: |
           cd ~/fox
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           
-          lunch omni_$CLEAN_NAME-userdebug
+          lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
-          # Force cleaning and start building
+          # Cleaning and Building
           make clean
           make recoveryimage -j$(nproc --all)
           
-          # Artifact collection
           mkdir -p ~/outputs
           find out/target/product/$CLEAN_NAME/ -name "recovery.img" -exec cp {} ~/outputs/ \;
           find out/target/product/$CLEAN_NAME/ -name "*.zip" -exec cp {} ~/outputs/ \;
