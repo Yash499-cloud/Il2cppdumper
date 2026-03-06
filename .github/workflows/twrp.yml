@@ -30,7 +30,7 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup Device Tree (Fixing missing separator)
+      - name: Setup Device Tree (The Final Solution)
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
@@ -38,30 +38,28 @@ jobs:
           
           cd device/tecno/$CLEAN_NAME
           
-          # 1. Sabhi .mk files se "PRODUCT_STATIC_BOOT_CONTROL_HAL" wali lines hatao
-          # Aur check karo ki koi empty/corrupt line na bache
-          find . -name "*.mk" -exec sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' {} +
+          # 1. Sabhi .mk files ko sanitize karo (Invisible characters hatao)
+          find . -name "*.mk" -exec sed -i 's/\r$//' {} +
           
-          # 2. device.mk ki line 24 ka gussa thanda karne ke liye file ko 'trim' karo
-          # Taki koi 'missing separator' ya hidden character na rahe
-          sed -i 's/[[:space:]]*$//' device.mk
-          
-          # 3. Architecture aur Broken Rules fix
-          {
-            echo "TARGET_SUPPORTS_64_BIT_APPS := true"
-            echo "BUILD_BROKEN_DUP_RULES := true"
-            echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
-            echo "ALLOW_MISSING_DEPENDENCIES := true"
-          } >> BoardConfig.mk
+          # 2. device.mk ki line 24 ka gussa khatam karne ke liye puri file ko clean rewrite karo
+          # Hum sirf kaam ki lines rakhenge aur obsolete wali ko ignore karenge
+          grep -v "PRODUCT_STATIC_BOOT_CONTROL_HAL" device.mk > device.mk.tmp && mv device.mk.tmp device.mk
 
-          # 4. AndroidProducts.mk (Standard Format)
+          # 3. AndroidProducts.mk ko bilkul simple rakho (No complex variables)
           cat <<EOF > AndroidProducts.mk
           PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
           COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
           EOF
 
-          # 5. vendorsetup.sh
+          # 4. vendorsetup.sh ko clean karo (OrangeFox ke liye zaroori hai)
           echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
+          
+          # 5. Architecture settings
+          {
+            echo "TARGET_SUPPORTS_64_BIT_APPS := true"
+            echo "BUILD_BROKEN_DUP_RULES := true"
+            echo "ALLOW_MISSING_DEPENDENCIES := true"
+          } >> BoardConfig.mk
 
       - name: Build Recovery
         run: |
@@ -70,9 +68,10 @@ jobs:
           source build/envsetup.sh
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           
-          lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
+          # Lunch test
+          lunch omni_$CLEAN_NAME-userdebug
           
-          # Cleaning and Building
+          # Building
           make clean
           make recoveryimage -j$(nproc --all)
           
