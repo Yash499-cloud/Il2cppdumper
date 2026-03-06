@@ -1,4 +1,4 @@
-name: Recovery Build FINAL EMERGENCY FIX
+name: Recovery Build Brutal Force #56
 
 on:
   workflow_dispatch:
@@ -28,44 +28,25 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Force Fix Device Tree
+      - name: Force Fix Device Tree & Inject Ninja Targets
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/$CLEAN_NAME || true
           
           cd device/tecno/$CLEAN_NAME
+          
+          # BoardConfig mein Recovery Target force karo
+          echo "BOARD_HAS_NO_SELECTIVE_FETCH := true" >> BoardConfig.mk
+          echo "RECOVERY_VARIANT := twrp" >> BoardConfig.mk
+          echo "TARGET_RECOVERY_DEVICE_DIRS := device/tecno/$CLEAN_NAME" >> BoardConfig.mk
+          
+          # Android.mk check (Ninja isko dhoondta hai)
+          if [ ! -f Android.mk ]; then
+            echo "include \$(call all-subdir-makefiles)" > Android.mk
+          fi
 
-          # Sab delete karo jo error de raha hai
-          rm -f device.mk AndroidProducts.mk vendorsetup.sh omni_$CLEAN_NAME.mk
-
-          # Naya Clean device.mk
-          echo "LOCAL_PATH := device/tecno/$CLEAN_NAME" > device.mk
-          echo "PRODUCT_COPY_FILES += \$(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab" >> device.mk
-
-          # Naya Clean AndroidProducts.mk
-          echo "PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk" > AndroidProducts.mk
-          echo "COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug" >> AndroidProducts.mk
-
-          # Naya Clean omni_TECNO_KI8.mk
-          cat <<EOF > omni_$CLEAN_NAME.mk
-          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)
-          \$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)
-          \$(call inherit-product, vendor/twrp/config/common.mk)
-          \$(call inherit-product, \$(LOCAL_PATH)/device.mk)
-          PRODUCT_DEVICE := $CLEAN_NAME
-          PRODUCT_NAME := omni_$CLEAN_NAME
-          PRODUCT_BRAND := Tecno
-          PRODUCT_MODEL := $CLEAN_NAME
-          PRODUCT_MANUFACTURER := Tecno
-          EOF
-
-          # BoardConfig Fix
-          sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' BoardConfig.mk
-          echo "TARGET_SUPPORTS_64_BIT_APPS := true" >> BoardConfig.mk
-          echo "ALLOW_MISSING_DEPENDENCIES := true" >> BoardConfig.mk
-
-      - name: Build Recovery
+      - name: Build Recovery (Brutal Mode)
         run: |
           cd ~/fox
           sudo swapoff -a || true
@@ -75,22 +56,27 @@ jobs:
           CLEAN_NAME=$(echo "TECNO_KI8" | sed 's/-/_/g')
           
           export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+          
           lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
-          # Force Ninja to build recovery
-          make recoveryimage -j$(nproc --all)
+          # Sabse bada weapon: Pehle bootimage try karo, phir recovery
+          # Kai baar A/B devices mein recovery boot.img ke andar hoti hai
+          make bootimage recoveryimage -j$(nproc --all) || make recovery -j$(nproc --all)
 
-      - name: Collect & Upload
+      - name: Collect Everything (Deep Scan)
         if: always()
         run: |
           mkdir -p ~/outputs
-          find ~/fox/out/target/product/ -name "recovery.img" -exec cp {} ~/outputs/ \;
+          # Ab hum pura out folder scan karenge
+          find ~/fox/out/target/product/ -name "*.img" -exec cp {} ~/outputs/ \;
+          find ~/fox/out/target/product/ -name "OrangeFox*.zip" -exec cp {} ~/outputs/ \;
           ls -R ~/outputs/
           
       - name: Upload Artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Recovery-Final-Result
+          name: Recovery-All-Possible-Images
           path: ~/outputs/*
           
