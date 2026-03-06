@@ -1,4 +1,4 @@
-name: Recovery Build
+name: Recovery Build Final Force
 
 on:
   workflow_dispatch:
@@ -9,44 +9,30 @@ env:
   DEVICE_TREE_URL: "https://github.com/Yash499-cloud/Il2cppdumper"
   DEVICE_TREE_BRANCH: "main"
   DEVICE_NAME: "TECNO_KI8"
-  BUILD_TARGET: "recovery"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cleanup Space
-        uses: rokibhasansagar/slimhub_actions@main
-
-      - name: Set up Environment
+      - name: Cleanup & Environment
         run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update
-          sudo apt-get install -y gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev libncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig libncurses-dev
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          sudo ln -sf ~/bin/repo /usr/bin/repo
+          sudo apt-get install -y gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev libncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig libncurses-dev git python3
+          mkdir -p ~/bin && curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo && sudo ln -sf ~/bin/repo /usr/bin/repo
 
       - name: Sync Source
         run: |
-          git config --global user.email "gh-actions@github.com"
-          git config --global user.name "GitHub Actions"
           mkdir -p ~/fox && cd ~/fox
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Sync Tree & Prepare Vendor Boot
+      - name: Setup Device Tree
         run: |
           cd ~/fox
+          # Ab folder ka naam seedha underscore wala rakhenge
           git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/${{ env.DEVICE_NAME }}
-          
-          # Create bundle folder for final upload
-          mkdir -p ~/fox/output_bundle
-          # Copy your uploaded vendor_boot.img from the repo root
-          cp device/tecno/${{ env.DEVICE_NAME }}/vendor_boot.img ~/fox/output_bundle/ || echo "Vendor Boot not found"
 
       - name: Build Recovery
         run: |
@@ -54,18 +40,22 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
           
-          # AI-Cleanup: Remove broken references that caused previous failures
-          find device/tecno/${{ env.DEVICE_NAME }} -name "*.mk" -exec sed -i '/vendor\/omni/d' {} +
-          
+          # Lunch ab seedha kaam karega
           lunch omni_${{ env.DEVICE_NAME }}-userdebug
-          mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
           
-          # Copy newly built recovery to bundle
-          cp out/target/product/${{ env.DEVICE_NAME }}/recovery.img ~/fox/output_bundle/ || true
+          # Force clean and build
+          make clean
+          make recoveryimage -j$(nproc --all)
+          
+          # Collecting outputs
+          mkdir -p ~/outputs
+          find out/target/product/${{ env.DEVICE_NAME }}/ -name "recovery.img" -exec cp {} ~/outputs/ \;
+          find out/target/product/${{ env.DEVICE_NAME }}/ -name "*.zip" -exec cp {} ~/outputs/ \;
 
-      - name: Upload Final Package
+      - name: Upload Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Tecno-KI8-Recovery-Pack
-          path: /home/runner/fox/output_bundle/*
+          name: Recovery-Final-Package
+          path: ~/outputs/*
           
