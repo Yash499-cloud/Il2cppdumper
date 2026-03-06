@@ -18,21 +18,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cleanup Space
-        uses: rokibhasansagar/slimhub_actions@main
-
-      - name: Set up Environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev libncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig libncurses-dev
-
-      - name: Install Repo Tool
-        run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          sudo ln -sf ~/bin/repo /usr/bin/repo
-
       - name: Sync Source
         run: |
           git config --global user.email "gh-actions@github.com"
@@ -41,45 +26,33 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: AI-Style Device Tree Fixer
+      - name: Sync Tree & Vendor Boot
         run: |
           cd ~/fox
-          # 1. Smart Cloning
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/${{ env.DEVICE_NAME }} || true
-          DT_PATH="device/tecno/${{ env.DEVICE_NAME }}"
+          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/${{ env.DEVICE_NAME }}
           
-          # 2. Folder Structural Fix (If nested)
-          if [ -d "$DT_PATH/TECNO-KI8" ]; then
-            mv $DT_PATH/TECNO-KI8/* $DT_PATH/
-          fi
+          # Create bundle folder
+          mkdir -p ~/fox/output_bundle
+          # Copy your uploaded vendor_boot.img
+          cp device/tecno/${{ env.DEVICE_NAME }}/vendor_boot.img ~/fox/output_bundle/ || echo "Vendor Boot not found"
 
-          # 3. SELF-HEALING: Remove references to non-existent files
-          echo "Scanning for broken inclusions..."
-          find $DT_PATH -type f -name "*.mk" | xargs sed -i '/vendor\/omni/d'
-          find $DT_PATH -type f -name "*.mk" | xargs sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d'
-          
-          # 4. Global Rename (Dash to Underscore)
-          find $DT_PATH -type f -exec sed -i 's/TECNO-KI8/TECNO_KI8/g' {} +
-          mv $DT_PATH/omni_TECNO-KI8.mk $DT_PATH/omni_${{ env.DEVICE_NAME }}.mk || true
-
-          # 5. Force-generate missing AndroidProducts.mk
-          cat <<EOF > $DT_PATH/AndroidProducts.mk
-          PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_${{ env.DEVICE_NAME }}.mk
-          COMMON_LUNCH_CHOICES := omni_${{ env.DEVICE_NAME }}-userdebug
-          EOF
-
-      - name: Build
+      - name: Build Recovery
         run: |
           cd ~/fox
           export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
           source build/envsetup.sh
+          # Fix common Omni error on-the-fly
+          sed -i '/vendor\/omni/d' device/tecno/${{ env.DEVICE_NAME }}/*.mk || true
+          
           lunch omni_${{ env.DEVICE_NAME }}-userdebug
           mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
+          
+          # Copy new recovery to bundle
+          cp out/target/product/${{ env.DEVICE_NAME }}/recovery.img ~/fox/output_bundle/ || true
 
-      - name: Upload Result
+      - name: Upload Everything
         uses: actions/upload-artifact@v4
         with:
-          name: Recovery-Image
-          path: /home/runner/fox/out/target/product/TECNO_KI8/*.img
+          name: Tecno-KI8-Final-Pack
+          path: /home/runner/fox/output_bundle/*
           
