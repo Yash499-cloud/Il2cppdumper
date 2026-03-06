@@ -9,8 +9,8 @@ env:
   DEVICE_TREE_URL: "https://github.com/Yash499-cloud/Il2cppdumper"
   DEVICE_TREE_BRANCH: "main"
   DEVICE_PATH: "device/tecno/TECNO-KI8"
-  DEVICE_NAME: "TECNO-KI8"
-  MAKEFILE_NAME: "omni_TECNO-KI8"
+  DEVICE_NAME: "TECNO_KI8" # Dash ko underscore se badla
+  MAKEFILE_NAME: "omni_TECNO_KI8"
   BUILD_TARGET: "recovery"
 
 jobs:
@@ -35,6 +35,43 @@ jobs:
           chmod a+x ~/bin/repo
           sudo ln -sf ~/bin/repo /usr/bin/repo
 
+      - name: Sync Source
+        run: |
+          git config --global user.email "gh-actions@github.com"
+          git config --global user.name "GitHub Actions"
+          mkdir -p ~/fox && cd ~/fox
+          repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
+          repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
+
+      - name: Clone Device Tree
+        run: |
+          cd ~/fox
+          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} ${{ env.DEVICE_PATH }}
+
+      - name: Fix Device Tree Files
+        run: |
+          cd ~/fox/${{ env.DEVICE_PATH }}
+          # Rename files to remove problematic dash
+          mv omni_TECNO-KI8.mk omni_TECNO_KI8.mk || true
+          # Replace all dashes with underscores in the makefiles
+          sed -i 's/TECNO-KI8/TECNO_KI8/g' AndroidProducts.mk || true
+          sed -i 's/TECNO-KI8/TECNO_KI8/g' omni_TECNO_KI8.mk || true
+          sed -i 's/TECNO-KI8/TECNO_KI8/g' vendorsetup.sh || true
+
+      - name: Build
+        run: |
+          cd ~/fox
+          export ALLOW_MISSING_DEPENDENCIES=true
+          source build/envsetup.sh
+          lunch ${{ env.MAKEFILE_NAME }}-userdebug
+          mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
+
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: Recovery-Image
+          path: /home/runner/fox/out/target/product/TECNO_KI8/recovery.img
+          
       - name: Sync Source
         run: |
           git config --global user.email "gh-actions@github.com"
