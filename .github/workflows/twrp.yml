@@ -1,4 +1,4 @@
-name: Recovery Build Final Force
+name: Recovery Build Self-Healing Final
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup Device Tree (Fixing Omni Path)
+      - name: Setup & Self-Heal Device Tree
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
@@ -36,34 +36,36 @@ jobs:
           
           cd device/tecno/$CLEAN_NAME
 
-          # 1. Sabhi files se Windows characters hatao
-          find . -type f -exec sed -i 's/\r//' {} +
-
-          # 2. SABSE ZAROORI: Omni path ko TWRP path se badlo
-          # Kyunki hum TWRP manifest use kar rahe hain
+          # Healer 1: Windows line endings & Path sanitization
+          find . -type f -name "*.mk" -exec sed -i 's/\r//' {} +
           find . -type f -name "*.mk" -exec sed -i 's/vendor\/omni/vendor\/twrp/g' {} +
+          
+          # Healer 2: Remove Obsolete Flags from ALL files
+          find . -type f -name "*.mk" -exec sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' {} +
+          find . -type f -name "*.mk" -exec sed -i '/add_lunch_combo/d' {} +
 
-          # 3. device.mk ko clean rakho
-          cat <<EOF > device.mk
-          LOCAL_PATH := device/tecno/$CLEAN_NAME
-          PRODUCT_COPY_FILES += \\
-              \$(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab
-          EOF
-
-          # 4. AndroidProducts.mk
+          # Healer 3: Fix AndroidProducts.mk (Standard Format)
           cat <<EOF > AndroidProducts.mk
           PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
           COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
           EOF
 
-          # 5. Architecture flags
+          # Healer 4: Vendorsetup (Clean)
+          echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
+          
+          # Healer 5: BoardConfig Force Architecture
           {
+            echo "TARGET_ARCH := arm64"
+            echo "TARGET_ARCH_VARIANT := armv8-a"
+            echo "TARGET_CPU_VARIANT := generic"
+            echo "TARGET_2ND_ARCH := arm"
             echo "TARGET_SUPPORTS_64_BIT_APPS := true"
             echo "BUILD_BROKEN_DUP_RULES := true"
             echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
+            echo "ALLOW_MISSING_DEPENDENCIES := true"
           } >> BoardConfig.mk
 
-      - name: Build Recovery
+      - name: Build Recovery (Force Mode)
         run: |
           cd ~/fox
           export ALLOW_MISSING_DEPENDENCIES=true
@@ -72,12 +74,31 @@ jobs:
           
           lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
+          # Ninja Bypass: Clear intermediates to force rebuild
+          rm -rf out/target/product/$CLEAN_NAME/obj/PACKAGING/recovery_patch_intermediates
+          
+          # Main Build Command
           make clean
           make recoveryimage -j$(nproc --all)
-          
+
+      - name: Deep Search & Collect Artifacts
+        if: always()
+        run: |
+          cd ~/fox
+          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           mkdir -p ~/outputs
-          find out/target/product/$CLEAN_NAME/ -name "recovery.img" -exec cp {} ~/outputs/ \;
-          find out/target/product/$CLEAN_NAME/ -name "*.zip" -exec cp {} ~/outputs/ \;
+          
+          # Standard Folder Check
+          cp out/target/product/$CLEAN_NAME/recovery.img ~/outputs/ 2>/dev/null || echo "Standard path failed"
+          
+          # Deep Search (Agar standard path fail ho jaye)
+          echo "Scanning for recovery.img..."
+          find out/ -name "recovery.img" -exec cp {} ~/outputs/ \;
+          find out/ -name "OrangeFox*.zip" -exec cp {} ~/outputs/ \;
+          find out/ -name "twrp*.img" -exec cp {} ~/outputs/ \;
+          
+          # List files for debugging
+          ls -R ~/outputs/
 
       - name: Upload Artifact
         if: always()
