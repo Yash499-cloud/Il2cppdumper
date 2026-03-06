@@ -2,6 +2,8 @@ name: Recovery Build Final Force
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 env:
   MANIFEST_URL: "https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
@@ -16,7 +18,7 @@ jobs:
     steps:
       - name: Cleanup & Environment
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
           sudo apt-get update
           sudo apt-get install -y gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev libncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig libncurses-dev git python3
           mkdir -p ~/bin && curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
@@ -28,29 +30,48 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup Device Tree
+      - name: Setup Device Tree (Fixing device.mk:24)
         run: |
           cd ~/fox
-          # Ab folder ka naam seedha underscore wala rakhenge
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/${{ env.DEVICE_NAME }}
+          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
+          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/$CLEAN_NAME
+          
+          cd device/tecno/$CLEAN_NAME
+          
+          # 1. Obsolete flag ko poore folder se delete karo (device.mk fix)
+          find . -type f -exec sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' {} +
+          
+          # 2. Architecture aur Broken Rules fix
+          echo "TARGET_SUPPORTS_64_BIT_APPS := true" >> BoardConfig.mk
+          echo "BUILD_BROKEN_DUP_RULES := true" >> BoardConfig.mk
+          echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true" >> BoardConfig.mk
 
-      - name: Build Recovery
+          # 3. AndroidProducts.mk ko clean karo
+          cat <<EOF > AndroidProducts.mk
+          PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
+          COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
+          EOF
+
+          # 4. vendorsetup.sh
+          echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
+
+      - name: Build Recovery (Force Compile)
         run: |
           cd ~/fox
           export ALLOW_MISSING_DEPENDENCIES=true
           source build/envsetup.sh
+          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           
-          # Lunch ab seedha kaam karega
-          lunch omni_${{ env.DEVICE_NAME }}-userdebug
+          lunch omni_$CLEAN_NAME-userdebug
           
-          # Force clean and build
+          # Force cleaning and start building
           make clean
           make recoveryimage -j$(nproc --all)
           
-          # Collecting outputs
+          # Artifact collection
           mkdir -p ~/outputs
-          find out/target/product/${{ env.DEVICE_NAME }}/ -name "recovery.img" -exec cp {} ~/outputs/ \;
-          find out/target/product/${{ env.DEVICE_NAME }}/ -name "*.zip" -exec cp {} ~/outputs/ \;
+          find out/target/product/$CLEAN_NAME/ -name "recovery.img" -exec cp {} ~/outputs/ \;
+          find out/target/product/$CLEAN_NAME/ -name "*.zip" -exec cp {} ~/outputs/ \;
 
       - name: Upload Artifact
         if: always()
