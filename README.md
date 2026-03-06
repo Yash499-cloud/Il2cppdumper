@@ -1,4 +1,4 @@
-# Android device tree for TECNO TECNO KI8 (TECNO-KI8)
+# Android device tree for TECNO TECNO KI8 (TECNO_KI8)
 
 ```
 #
