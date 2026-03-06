@@ -2,8 +2,6 @@ name: Recovery Build Final Force
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
 
 env:
   MANIFEST_URL: "https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
@@ -30,35 +28,39 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Setup Device Tree (The Final Solution)
+      - name: Setup Device Tree (The Ultimate Overwrite)
         run: |
           cd ~/fox
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/$CLEAN_NAME
           
           cd device/tecno/$CLEAN_NAME
-          
-          # 1. Sabhi .mk files ko sanitize karo (Invisible characters hatao)
-          find . -name "*.mk" -exec sed -i 's/\r$//' {} +
-          
-          # 2. device.mk ki line 24 ka gussa khatam karne ke liye puri file ko clean rewrite karo
-          # Hum sirf kaam ki lines rakhenge aur obsolete wali ko ignore karenge
-          grep -v "PRODUCT_STATIC_BOOT_CONTROL_HAL" device.mk > device.mk.tmp && mv device.mk.tmp device.mk
 
-          # 3. AndroidProducts.mk ko bilkul simple rakho (No complex variables)
+          # 1. Sabhi .mk files ko sanitize karo (Invisible Windows characters hatao)
+          find . -name "*.mk" -exec sed -i 's/\r//' {} +
+
+          # 2. device.mk ko bilkul naya bana do (Nuclear Option)
+          # Purana device.mk aksar TWRP ke liye zaroori nahi hota, bas placeholders chahiye
+          cat <<EOF > device.mk
+          LOCAL_PATH := device/tecno/$CLEAN_NAME
+          PRODUCT_COPY_FILES += \\
+              \$(LOCAL_PATH)/recovery.fstab:recovery/root/etc/recovery.fstab
+          EOF
+
+          # 3. AndroidProducts.mk ko clean rewrite karo
           cat <<EOF > AndroidProducts.mk
           PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_$CLEAN_NAME.mk
           COMMON_LUNCH_CHOICES := omni_$CLEAN_NAME-userdebug
           EOF
 
-          # 4. vendorsetup.sh ko clean karo (OrangeFox ke liye zaroori hai)
+          # 4. vendorsetup.sh
           echo "add_lunch_combo omni_$CLEAN_NAME-userdebug" > vendorsetup.sh
           
-          # 5. Architecture settings
+          # 5. Architecture flags in BoardConfig
           {
             echo "TARGET_SUPPORTS_64_BIT_APPS := true"
             echo "BUILD_BROKEN_DUP_RULES := true"
-            echo "ALLOW_MISSING_DEPENDENCIES := true"
+            echo "BUILD_BROKEN_ELF_PREBUILT_PRODUCT_COPY_FILES := true"
           } >> BoardConfig.mk
 
       - name: Build Recovery
@@ -68,8 +70,8 @@ jobs:
           source build/envsetup.sh
           CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
           
-          # Lunch test
-          lunch omni_$CLEAN_NAME-userdebug
+          # Force lunch
+          lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
           
           # Building
           make clean
