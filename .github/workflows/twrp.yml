@@ -41,34 +41,32 @@ jobs:
           repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
           repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
 
-      - name: Smart Clone and Fix
+      - name: Ultra-Smart Fixer
         run: |
           cd ~/fox
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/temp_device
-          
-          # Folder detection logic
-          if [ -f "device/tecno/temp_device/AndroidProducts.mk" ]; then
-             mv device/tecno/temp_device device/tecno/${{ env.DEVICE_NAME }}
-          else
-             REAL_FOLDER=$(ls device/tecno/temp_device | head -n 1)
-             mv device/tecno/temp_device/$REAL_FOLDER device/tecno/${{ env.DEVICE_NAME }}
-          fi
-          
-          # Fix Obsolete Errors and Paths
+          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/${{ env.DEVICE_NAME }}
           cd device/tecno/${{ env.DEVICE_NAME }}
+          
+          # 1. Sabse pehle names clean karo
           find . -name "omni_*.mk" -exec mv {} omni_${{ env.DEVICE_NAME }}.mk \; || true
-          
-          # Delete the line causing the error (PRODUCT_STATIC_BOOT_CONTROL_HAL)
-          sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk || true
-          
-          # Global Replace and Cleanup
           find . -type f -exec sed -i "s/TECNO-KI8/${{ env.DEVICE_NAME }}/g" {} +
-          find . -type f -exec sed -i "s/omni_TECNO-KI8/omni_${{ env.DEVICE_NAME }}/g" {} +
+          
+          # 2. Obsolete lines ko comment karo (taaki syntax na bigde)
+          sed -i 's/^PRODUCT_STATIC_BOOT_CONTROL_HAL/#&/' device.mk || true
+          sed -i 's/^include $(BUILD_STATIC_LIBRARY)/#&/' Android.mk || true
+          
+          # 3. Missing separator fix (sabse bada locha yahi hai)
+          # Ye command har line ko check karegi aur unwanted characters hatayegi
+          sed -i 's/\r$//' *.mk *.sh || true 
+          
+          # 4. AndroidProducts.mk fix
+          echo -e "PRODUCT_MAKEFILES := \$(LOCAL_DIR)/omni_${{ env.DEVICE_NAME }}.mk\n\nCOMMON_LUNCH_CHOICES := omni_${{ env.DEVICE_NAME }}-userdebug" > AndroidProducts.mk
 
       - name: Build
         run: |
           cd ~/fox
           export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
           source build/envsetup.sh
           lunch omni_${{ env.DEVICE_NAME }}-userdebug
           mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
