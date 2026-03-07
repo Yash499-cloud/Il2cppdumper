@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Auto-Optimized)
+name: OrangeFox - Build KI8 (Final-Fix)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,6 @@ jobs:
   build:
     name: Build OFRP by ${{ github.actor }}
     runs-on: ubuntu-latest
-    if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
@@ -22,7 +21,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Clean-up & Space Management
+    - name: Maximize Build Space
       uses: rokibhasansagar/slimhub_actions@main
 
     - name: Set Swap Space (24GB)
@@ -33,18 +32,17 @@ jobs:
     - name: Build Environment Setup
       run: |
         sudo apt update
-        sudo apt -y upgrade
+        sudo apt install -y git python3 python3-pip bc bison build-essential curl flex g++-multilib gcc-multilib gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
         git clone https://gitlab.com/OrangeFox/misc/scripts
-        cd scripts
-        sudo bash setup/android_build_env.sh
+        cd scripts && sudo bash setup/android_build_env.sh
       
-    - name: Sync OrangeFox Manifest
+    - name: Sync OrangeFox Source
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
         cd ${GITHUB_WORKSPACE}/OrangeFox
         git config --global user.name "Yash499"
         git config --global user.email "yash@example.com"
-        git clone https://gitlab.com/OrangeFox/sync.git
+        git clone https://gitlab.com/OrangeFox/sync.git sync
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
@@ -52,45 +50,33 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
         git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
-        cd ${{ env.DEVICE_PATH }}
-        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-    - name: Building OrangeFox (Fixing Theme & Ninja)
+    - name: Building OrangeFox (The Final Boss Fix)
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
         set +e
         source build/envsetup.sh
-        
-        # --- THEME & RESOLUTION FIX (Pichla error yahan tha) ---
+        # Resolution & Theme Fix (Camon 19 Neo)
         export TARGET_SCREEN_HEIGHT=2460
         export TARGET_SCREEN_WIDTH=1080
         export TW_THEME=portrait_hdpi
-        export DEVICE_PATH=${{ env.DEVICE_PATH }}
-        
-        # --- EXTRA BUILD FLAGS ---
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
-        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
         
-        # Developer's Logic with Auto-Fallback
         lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
         
         make clean
         mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
         set -e
 
-    - name: Upload to Release
+    - name: Auto-Grab and Release
       if: always()
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.img
-          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip
-          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/recovery.img
-        name: OrangeFox Recovery for Tecno KI8 // ${{ github.run_id }}
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/*.img
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/*.zip
+        name: OrangeFox Recovery KI8 Final // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: |
-          Build Succeeded!
-          Device: Tecno KI8 (Camon 19 Neo)
-          Branch: ${{ env.MANIFEST_BRANCH }}
-          
+        body: "Build Finished! Check the assets for your recovery files."
+        
