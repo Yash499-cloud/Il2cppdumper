@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Final-Fix)
+name: OrangeFox - Build KI8 (Final-Absolute-Fix)
 
 on:
   workflow_dispatch:
@@ -29,12 +29,11 @@ jobs:
       with:
         swap-size-gb: 24
       
-    - name: Build Environment Setup
+    - name: Fix Apt & Install Essential Tools
       run: |
         sudo apt update
-        sudo apt install -y git python3 python3-pip bc bison build-essential curl flex g++-multilib gcc-multilib gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
-        git clone https://gitlab.com/OrangeFox/misc/scripts
-        cd scripts && sudo bash setup/android_build_env.sh
+        # Sirf basic tools install kar rahe hain, baaki OrangeFox script sambhal legi
+        sudo apt install -y git python3 python3-pip bc bison build-essential curl flex g++-multilib gcc-multilib gperf libxml2 libxml2-utils lzop rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
       
     - name: Sync OrangeFox Source
       run: |
@@ -46,37 +45,45 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-    - name: Clone Device Tree
+    - name: Clone Device Tree (HTTPS Fix)
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        # Purana SSH error hatane ke liye direct HTTPS clone
         git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
 
-    - name: Building OrangeFox (The Final Boss Fix)
+    - name: Building OrangeFox (Theme & Ninja Fix)
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
         set +e
         source build/envsetup.sh
-        # Resolution & Theme Fix (Camon 19 Neo)
+        
+        # --- PREVIOUS ERRORS FIXED HERE ---
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export LC_ALL=C
+        # Theme/UI Fix for KI8
         export TARGET_SCREEN_HEIGHT=2460
         export TARGET_SCREEN_WIDTH=1080
         export TW_THEME=portrait_hdpi
-        export ALLOW_MISSING_DEPENDENCIES=true
-        export LC_ALL=C
+        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
         
+        # Developer's Logic
         lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
         
         make clean
         mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
         set -e
 
-    - name: Auto-Grab and Release
+    - name: Final Release (Auto-Detect Files)
       if: always()
       uses: softprops/action-gh-release@v2
       with:
         files: |
           ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/*.img
           ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/*.zip
-        name: OrangeFox Recovery KI8 Final // ${{ github.run_id }}
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/recovery.img
+        name: OrangeFox Recovery KI8 Final-Build // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: "Build Finished! Check the assets for your recovery files."
-        
+        body: |
+          Build Finished! 
+          If files are missing, check the Actions Summary page under 'Artifacts'.
+          
