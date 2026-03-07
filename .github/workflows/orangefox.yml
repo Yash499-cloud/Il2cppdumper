@@ -17,6 +17,7 @@ jobs:
       PRODUCT_NAME: 'omni_TECNO_KI8'
     permissions:
       contents: write
+
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -28,7 +29,7 @@ jobs:
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 24
-      
+
     - name: Build Environment
       run: |
         sudo apt update
@@ -36,7 +37,7 @@ jobs:
         git clone https://gitlab.com/OrangeFox/misc/scripts scripts_env
         cd scripts_env
         sudo bash setup/android_build_env.sh
-      
+
     - name: Set-up Manifest
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
@@ -47,48 +48,147 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-    - name: Clone Device Tree
+    - name: Clone Device Tree Properly
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # Cloning to correct path
+        
+        # Pehle purani device tree delete karo (agar already hai)
+        rm -rf ./${{ env.DEVICE_PATH }}
+        
+        # Clone karo device tree
         git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
         
-        # AUTO-REPAIR: Files ko theek karna
+        # Clone ke baad check karo
         cd ./${{ env.DEVICE_PATH }}
-        # Obsolete lines delete karna
-        sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk || true
-        # Agar vendorsetup.sh galti se clone hui to delete karna
-        rm -f vendorsetup.sh || true
+        
+        # Agar vendorsetup.sh missing ho to create karo (kyunki teri tree mein hai nahi)
+        if [ ! -f vendorsetup.sh ]; then
+          echo "add_lunch_combo ${{ env.PRODUCT_NAME }}-userdebug" > vendorsetup.sh
+          echo "add_lunch_combo ${{ env.PRODUCT_NAME }}-eng" >> vendorsetup.sh
+        fi
+        
+        # BoardConfig.mk check karo
+        if [ ! -f BoardConfig.mk ]; then
+          echo "❌ BoardConfig.mk missing!"
+          exit 1
+        fi
+        
+        # recovery.fstab check karo
+        if [ ! -f recovery.fstab ]; then
+          echo "❌ recovery.fstab missing!"
+          exit 1
+        fi
+        
+        # device.mk check karo
+        if [ ! -f device.mk ]; then
+          echo "❌ device.mk missing!"
+          exit 1
+        fi
+        
+        # prebuilt folder check
+        if [ ! -d prebuilt ]; then
+          echo "⚠️ prebuilt folder missing, kernel/dtb check karo"
+        else
+          ls -l prebuilt/
+        fi
+        
+        # recovery/root check
+        if [ ! -d recovery/root ]; then
+          echo "⚠️ recovery/root missing, init files check karo"
+        fi
         
         echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-    - name: Building OrangeFox
+    - name: Building OrangeFox with Debug
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # environment load karna
+        
+        # Environment load
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         
-        echo "--- RUNNING LUNCH ---"
-        # Lunch with detailed error capture
-        lunch ${{ env.PRODUCT_NAME }}-eng || { echo "LUNCH_FAILED=true" >> $GITHUB_ENV; lunch ${{ env.PRODUCT_NAME }}-eng; exit 1; }
+        echo "📱 Available combos:"
+        print_lunch_menu
+        
+        echo "--- RUNNING LUNCH WITH FULL LOG ---"
+        # Lunch command with full debug
+        lunch ${{ env.PRODUCT_NAME }}-eng 2>&1 | tee lunch_log.txt
+        
+        # Check karo lunch successful hua ya nahi
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then
+          echo "❌ LUNCH FAILED!"
+          echo "📄 Last 20 lines of log:"
+          tail -20 lunch_log.txt
+          
+          # Common fixes
+          echo "🔧 Checking common issues..."
+          
+          # Check if device path exists
+          if [ ! -d device/tecno/KI8 ]; then
+            echo "❌ device/tecno/KI8 not found!"
+            ls -la device/tecno/ || true
+          fi
+          
+          # Check AndroidProducts.mk
+          if [ -f device/tecno/KI8/AndroidProducts.mk ]; then
+            echo "✅ AndroidProducts.mk exists"
+            cat device/tecno/KI8/AndroidProducts.mk
+          else
+            echo "❌ AndroidProducts.mk missing! Creating..."
+            echo "PRODUCT_MAKEFILES := \$(LOCAL_DIR)/${{ env.PRODUCT_NAME }}.mk" > device/tecno/KI8/AndroidProducts.mk
+          fi
+          
+          exit 1
+        fi
+        
+        echo "✅ LUNCH SUCCESSFUL"
         
         echo "--- STARTING MKA ---"
-        mka adbd recoveryimage -j$(nproc --all)
+        mka adbd recoveryimage -j$(nproc --all) 2>&1 | tee build_log.txt
+        
+        # Build successful hua ki nahi check
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then
+          echo "❌ BUILD FAILED!"
+          echo "📄 Last 50 lines of build log:"
+          tail -50 build_log.txt
+          exit 1
+        fi
 
     - name: Check and Prepare Files
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/
-        if [ -d "TECNO_KI8" ]; then cd TECNO_KI8; elif [ -d "KI8" ]; then cd KI8; else exit 1; fi
         
+        # Check possible output directories
+        if [ -d "TECNO_KI8" ]; then 
+          cd TECNO_KI8
+          echo "📁 Output dir: TECNO_KI8"
+        elif [ -d "KI8" ]; then 
+          cd KI8
+          echo "📁 Output dir: KI8"
+        else
+          echo "❌ No output directory found!"
+          ls -la
+          exit 1
+        fi
+        
+        # Check for OrangeFox images
         if [ -f OrangeFox*.img ]; then
+            echo "✅ OrangeFox image found!"
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
             cp OrangeFox*.img recovery.img
             echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
+            
+            # Installer zip download and update
             wget https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
             zip -ur recovery-installer.zip recovery.img
+            
+            # Also check for zip
+            if [ -f OrangeFox*.zip ]; then
+              echo "✅ OrangeFox zip found!"
+            fi
         else
-            echo "Build failed: Image not found."
+            echo "❌ Build failed: OrangeFox image not found!"
+            ls -la *.img || true
             exit 1
         fi
 
