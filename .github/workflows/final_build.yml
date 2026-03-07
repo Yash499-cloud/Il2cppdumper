@@ -1,9 +1,6 @@
 name: OrangeFox - Build (Automated for Tecno KI8)
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 jobs:
   build:
     name: Build OFRP for Tecno KI8
