@@ -51,18 +51,22 @@ jobs:
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
         git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Yash499-cloud/Il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        
+        # Auto-Fix for any remaining obsolete variables
+        cd ./${{ env.DEVICE_PATH }}
+        sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk
+        sed -i '/COMMON_LUNCH_CHOICES/d' vendorsetup.sh 2>/dev/null
+        
         echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # Script ko crash hone se rokne ke liye set +e
-        set +e
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         
         echo "--- Starting Lunch ---"
-        lunch ${{ env.PRODUCT_NAME }}-eng
+        lunch ${{ env.PRODUCT_NAME }}-eng || { echo "Lunch failed"; exit 1; }
         
         echo "--- Starting Build ---"
         mka adbd recoveryimage -j$(nproc --all)
@@ -90,5 +94,6 @@ jobs:
         files: |
           ${{ env.FILE_PATH }}/recovery.img
           ${{ env.FILE_PATH }}/recovery-installer.zip
+          ${{ env.FILE_PATH }}/OrangeFox*.zip
         name: Unofficial OrangeFox for KI8 // ${{ env.COMMIT_ID }}
         tag_name: ${{ github.run_id }}
