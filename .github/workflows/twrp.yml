@@ -253,3 +253,4 @@ jobs:
         echo "Neural engine analysis: Build crashed before completion."
         echo "Consult the cloud log link for specific MTK hardware mismatch."
         ls -R work/fox_root/device/tecno/KI8 | head -n 40
+        
