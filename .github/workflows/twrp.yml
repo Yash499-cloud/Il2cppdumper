@@ -1,55 +1,83 @@
-name: OrangeFox - Il2cpp Special Build
+name: OrangeFox - Build KI8 (Auto-Optimized)
 
 on:
-  workflow_dispatch:
-    inputs:
-      DEVICE_TREE:
-        description: 'Il2cpp Repo Link'
-        required: true
-        default: 'https://github.com/Yash499-cloud/Recovery'
-      DEVICE_TREE_BRANCH:
-        description: 'Branch Name'
-        required: true
-        default: 'main'
-      DEVICE_NAME:
-        description: 'Device Codename (e.g. KI8)'
-        required: true
-        default: 'KI8'
+  workflow_dispatch: # Ab koi box nahi khulega, bas button dabao
 
 jobs:
   build:
+    name: Build OFRP by ${{ github.actor }}
     runs-on: ubuntu-latest
+    if: github.event.repository.owner.id == github.event.sender.id
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Yahan maine saari details fix kardi hain jo tum manually bharte thay
+      MANIFEST_BRANCH: '12.1'
+      DEVICE_TREE: 'https://github.com/Yash499-cloud/Recovery'
+      DEVICE_TREE_BRANCH: 'main'
+      DEVICE_PATH: 'device/tecno/KI8'
+      DEVICE_NAME: 'KI8'
+      BUILD_TARGET: 'recovery'
+      LDCHECK: 'vendor/bin/hw/android.hardware.boot@1.0-service'
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4 # Updated to v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Maximize Build Space
-        uses: rokibhasansagar/slimhub_actions@main
+    - name: Clean-up & Space
+      uses: rokibhasansagar/slimhub_actions@main
 
-      - name: Set-up Environment
-        run: |
-          sudo apt update
-          sudo apt install -y bc build-essential zip curl libstdc++6 git wget python3
-          git clone https://github.com/TwrpBuilder/twrp-builder-tools.git tools
+    - name: Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+      
+    - name: Build Environment
+      run: |
+        sudo apt update
+        sudo apt -y upgrade
+        git clone https://gitlab.com/OrangeFox/misc/scripts
+        cd scripts
+        sudo bash setup/android_build_env.sh
+      
+    - name: Set-up Manifest
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+        cd ${GITHUB_WORKSPACE}/OrangeFox
+        git config --global user.name "Yash499"
+        git config --global user.email "yash@example.com"
+        git clone https://gitlab.com/OrangeFox/sync.git
+        cd sync
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-      - name: Clone Il2cpp Tree & Images
-        run: |
-          git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} workspace
-          cd workspace
-          ls -R
+    - name: Clone Device Tree (Auto Path)
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        # Yahan SSH ki jagah HTTPS use ho raha hai bina error ke
+        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        cd ${{ env.DEVICE_PATH }}
+        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-      - name: Execute Il2cpp Build (Ninja Bypass)
-        run: |
-          cd workspace
-          chmod +x *.sh || true
-          export ALLOW_MISSING_DEPENDENCIES=true
-          # Yahan wo script chalegi jo pichli 40 bar fail hui thi
-          # Is baar repack method use hoga
-          bash repackimg.sh --boot boot.img --tree ./tree --output OrangeFox-KI8.img || echo "Script not found, attempting manual repack"
+    - name: Building OrangeFox (Ninja Fix)
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        set +e
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        # Developer ka original error handling logic:
+        lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
+        make clean
+        mka ${{ env.BUILD_TARGET }}image
+        set -e
 
-      - name: Upload Result
-        uses: actions/upload-artifact@v4 # Version updated from v3 to v4
-        with:
-          name: OrangeFox-Final-Build
-          path: workspace/*.img
-          
+    - name: Upload to Release (V4)
+      if: always()
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.img
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip
+        name: Unofficial OrangeFox for ${{ env.DEVICE_NAME }}
+        tag_name: ${{ github.run_id }}
+        body: "Build auto-generated for Tecno KI8"
+        
