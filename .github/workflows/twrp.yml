@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Final-Polished)
+name: OrangeFox - Build KI8 (Absolute-Final-Fix)
 
 on:
   workflow_dispatch:
@@ -23,80 +23,83 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Clean-up & Swap
-      run: |
-        docker image prune -a -f
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-    
-    - name: Set Swap Space
+    - name: Maximize Disk Space
+      uses: rokibhasansagar/slimhub_actions@main
+
+    - name: Set Swap Space (24GB)
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 24
       
-    - name: Build Environment Setup
+    - name: Install Environment
       run: |
         sudo apt update
-        sudo apt install -y git python3 bc build-essential zip curl libncurses-dev rsync
+        sudo apt install -y git python3 bc build-essential zip curl libncurses-dev rsync wget
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts && sudo bash setup/android_build_env.sh
       
-    - name: Set-up Manifest & Clone Tree
+    - name: Sync Source & Clone Tree (Merged Step)
       run: |
-        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
-        cd ${GITHUB_WORKSPACE}/OrangeFox
+        # Step 1: Syncing
+        mkdir -p ${GITHUB_WORKSPACE}/work
+        cd ${GITHUB_WORKSPACE}/work
         git config --global user.name "Yash499"
         git config --global user.email "yash@example.com"
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
-        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
         
-        # Merge Step: Clone Tree immediately after Sync
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
-        
-        # Inject BoardConfig Fixes
-        BC_PATH="${{ env.DEVICE_PATH }}/BoardConfig.mk"
-        if [ -f "$BC_PATH" ]; then
-          echo "TARGET_SCREEN_HEIGHT := 2460" >> $BC_PATH
-          echo "TARGET_SCREEN_WIDTH := 1080" >> $BC_PATH
-          echo "TW_THEME := portrait_hdpi" >> $BC_PATH
+        # Step 2: Verification (Is the folder there?)
+        if [ ! -d "${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}" ]; then
+          echo "ERROR: Sync folder not created. Retrying manual directory creation..."
+          mkdir -p ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
         fi
+        
+        # Step 3: Clone Device Tree
+        cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
+        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }} || echo "Tree already exists or failed to clone"
 
     - name: Building OrangeFox
       run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # Set environment variables inside the same shell
+        # Logic: Pehle check karo folder hai ya nahi
+        if [ ! -d "${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}/build" ]; then
+           echo "Build system not found. Sync probably failed."
+           exit 1
+        fi
+        
+        cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
+        source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
-        source build/envsetup.sh
         
-        # Try lunch and build
+        # UI/Theme Fix
+        BC_PATH="${{ env.DEVICE_PATH }}/BoardConfig.mk"
+        echo "TARGET_SCREEN_HEIGHT := 2460" >> $BC_PATH
+        echo "TARGET_SCREEN_WIDTH := 1080" >> $BC_PATH
+        echo "TW_THEME := portrait_hdpi" >> $BC_PATH
+        
         lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
-        
-        # build without cleaning if it's a fresh sync to save time
         mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
 
-    - name: Check & Release
+    - name: Release Artifacts
       if: always()
       run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        OUT_PATH="out/target/product/${{ env.DEVICE_NAME }}"
-        if [ -f $OUT_PATH/OrangeFox*.img ]; then
-            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            echo "FILE_PATH=${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/$OUT_PATH" >> $GITHUB_ENV
-        else
-            echo "Build failed to generate image."
-            exit 1
+        # Intelligent search for the image file
+        cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
+        FIND_IMG=$(find out/target/product/${{ env.DEVICE_NAME }} -name "OrangeFox*.img" | head -n 1)
+        if [ -n "$FIND_IMG" ]; then
+           mkdir -p ${GITHUB_WORKSPACE}/output
+           cp $FIND_IMG ${GITHUB_WORKSPACE}/output/recovery.img
+           cp out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip ${GITHUB_WORKSPACE}/output/ 2>/dev/null || true
+           echo "FILE_READY=true" >> $GITHUB_ENV
         fi
 
     - name: Upload to Release
-      if: env.CHECK_IMG_IS_OK == 'true'
+      if: env.FILE_READY == 'true'
       uses: softprops/action-gh-release@v1
       with:
-        files: |
-          ${{ env.FILE_PATH }}/OrangeFox*.img
-          ${{ env.FILE_PATH }}/OrangeFox*.zip
+        files: ${GITHUB_WORKSPACE}/output/*
         name: OrangeFox Recovery KI8 // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: "Successfully built for Camon 19 Neo (KI8)."
+        body: "Build successful for Camon 19 Neo (KI8)."
         
