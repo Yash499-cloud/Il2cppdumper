@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Fast-Fix)
+name: OrangeFox - Build KI8 (Final-Path-Fix)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     name: Build OFRP by ${{ github.actor }}
-    runs-on: ubuntu-22.04 # 24.04 ki jagah stable 22.04 use kar rahe hain
+    runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -15,7 +15,6 @@ jobs:
       DEVICE_TREE_BRANCH: 'main'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
-      BUILD_TARGET: 'recovery'
     permissions:
       contents: write
 
@@ -34,7 +33,6 @@ jobs:
     - name: Fast Environment Setup
       run: |
         sudo apt update
-        # Sirf zaruri tools, koi upgrade ya faltu graphics nahi
         sudo apt install -y git python3 bc build-essential zip curl libncurses5 rsync wget libssl-dev
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts && sudo bash setup/android_build_env.sh
@@ -49,35 +47,45 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
         
-        # Move to fox root and clone tree
+        # Go to the actual source root
         cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
+        
+        # Logic: Ensure the device path exists before cloning
+        mkdir -p ${{ env.DEVICE_PATH }}
         git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
 
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
-        source build/envsetup.sh
+        
+        # Hard Fix for BoardConfig (Ensure we are in the right place)
+        if [ -f ${{ env.DEVICE_PATH }}/BoardConfig.mk ]; then
+          sed -i '/TARGET_SCREEN_HEIGHT/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
+          sed -i '/TARGET_SCREEN_WIDTH/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
+          echo "TARGET_SCREEN_HEIGHT := 2460" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
+          echo "TARGET_SCREEN_WIDTH := 1080" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
+          echo "TW_THEME := portrait_hdpi" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
+        fi
+
+        # Source environment
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
+        source build/envsetup.sh
         
-        # KI8 specific BoardConfig fixes on-the-fly
-        sed -i '/TARGET_SCREEN_HEIGHT/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
-        echo "TARGET_SCREEN_HEIGHT := 2460" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
-        echo "TARGET_SCREEN_WIDTH := 1080" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
-        echo "TW_THEME := portrait_hdpi" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
+        # Try lunch with a fallback to find the target
+        lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng || lunch ${{ env.DEVICE_NAME }}-eng
         
-        lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
-        mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
+        mka recoveryimage -j$(nproc --all)
 
     - name: Release Files
       if: always()
       run: |
         cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
         OUT_PATH="out/target/product/${{ env.DEVICE_NAME }}"
-        if [ -f $OUT_PATH/OrangeFox*.img ]; then
+        if [ -d "$OUT_PATH" ]; then
            mkdir -p ${GITHUB_WORKSPACE}/upload
-           cp $OUT_PATH/OrangeFox*.img ${GITHUB_WORKSPACE}/upload/
-           cp $OUT_PATH/OrangeFox*.zip ${GITHUB_WORKSPACE}/upload/
+           find $OUT_PATH -name "OrangeFox*.img" -exec cp {} ${GITHUB_WORKSPACE}/upload/ \;
+           find $OUT_PATH -name "OrangeFox*.zip" -exec cp {} ${GITHUB_WORKSPACE}/upload/ \;
            echo "BUILD_OK=true" >> $GITHUB_ENV
         fi
 
