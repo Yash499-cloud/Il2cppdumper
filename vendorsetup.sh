@@ -1,1 +1,1 @@
-# Use AndroidProducts.mk instead
+# Obsolete in Android 12.1
