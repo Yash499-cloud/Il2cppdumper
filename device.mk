@@ -21,7 +21,6 @@ PRODUCT_PACKAGES += \
 PRODUCT_PACKAGES += \
     bootctrl.mt6833
 
-    bootctrl.mt6833 \
     libgptutils \
     libz \
     libcutils
