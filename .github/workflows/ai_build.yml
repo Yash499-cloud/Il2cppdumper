@@ -1,76 +1,107 @@
-name: OrangeFox - God-Mode AI Build Engine (KI8-Structure-Verified)
+name: OrangeFox - Build (Automated for Tecno KI8)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    name: Build OFRP for Tecno KI8
+    runs-on: ubuntu-latest
+    if: github.event.repository.owner.id == github.event.sender.id
     env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
+      # Aapki repo ka sahi naam yahan set kar diya hai
+      DEVICE_TREE: 'https://github.com/${{ github.repository_owner }}/il2cppdumper'
+      DEVICE_TREE_BRANCH: 'fox_12.1'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
-      TREE_URL: 'https://github.com/Yash499-cloud/Recovery'
+      BUILD_TARGET: 'recovery'
     permissions:
       contents: write
-
     steps:
-      - name: 🚀 Environment Boot-Up
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v3
 
-      - name: 🧹 System Purge (Max Space)
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo apt-get clean
+    - name: Clean-up
+      uses: rokibhasansagar/slimhub_actions@main
 
-      - name: 🔄 Sync OrangeFox Source
-        run: |
-          mkdir -p work && cd work
-          git config --global user.name "Yash499-cloud"
-          git config --global user.email "ai@build.com"
-          git clone https://gitlab.com/OrangeFox/sync.git -b master sync_logic
-          cd sync_logic
-          ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_root
+    - name: Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+      
+    - name: Build Environment
+      run: |
+        sudo apt update
+        sudo apt -y upgrade
+        git clone https://gitlab.com/OrangeFox/misc/scripts
+        cd scripts
+        sudo bash setup/android_build_env.sh
+      
+    - name: Set-up Manifest
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+        cd ${GITHUB_WORKSPACE}/OrangeFox
+        git config --global user.name "Samuel Kendall"
+        git config --global user.email "kinguser981@gmail.com"
+        git clone https://gitlab.com/OrangeFox/sync.git
+        cd sync
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-      - name: 🌳 Tree Extraction & Structure Alignment (Based on Photos)
-        run: |
-          cd work/fox_root
-          mkdir -p ${{ env.DEVICE_PATH }}
-          git clone ${{ env.TREE_URL }} -b main ./${{ env.DEVICE_PATH }}
-          cd ${{ env.DEVICE_PATH }}
+    - name: Clone Device Tree (Fixed Auth & Repo Name)
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        # il2cppdumper repo ko device path par clone karna
+        git clone https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository_owner }}/il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        cd ${{ env.DEVICE_PATH }}
+        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+    - name: Check Manifest Branch & Prepare Build
+      uses: haya14busa/action-cond@v1
+      id: fox_branch
+      with:
+        # Screenshot ke pattern 'omni_TECNO-KI8.mk' ko follow karte hue
+        cond: ${{ env.MANIFEST_BRANCH == '12.1' }}
+        if_true: lunch omni_${{ env.DEVICE_NAME }}-eng && make clean && mka adbd ${{ env.BUILD_TARGET }}image
+        if_false: lunch omni_${{ env.DEVICE_NAME }}-eng && make clean && mka ${{ env.BUILD_TARGET }}image
+      
+    - name: Building OrangeFox
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        set +e
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        set -e
+        ${{ steps.fox_branch.outputs.value }}
+
+    - name: Set Build Date
+      run: |
+        echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+
+    - name: Check and Rename Recovery
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}
+        if [ -f OrangeFox*.img ]; then
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            mv OrangeFox*.img recovery.img
+            echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
+        else
+            echo "Build finished but no .img found in out directory."
+            exit 1
+        fi
+
+    - name: Upload to Release
+      if: env.CHECK_IMG_IS_OK == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ env.FILE_PATH }}/recovery.img
+          ${{ env.FILE_PATH }}/OrangeFox*.zip
+        name: Unofficial OrangeFox for ${{ env.DEVICE_NAME }} // ${{ env.BUILD_DATE }}
+        tag_name: ${{ github.run_id }}
+        body: |
+          Device: Tecno KI8
+          Source: il2cppdumper (Branch: fox_12.1)
+          Commit: ${{ env.COMMIT_ID }}
           
-          # Force Extracting Zip
-          if [ -f "tecno_tree.zip" ]; then
-            unzip -o tecno_tree.zip
-            rm tecno_tree.zip
-          fi
-
-          # Photo Analysis: Aligning Paths
-          # Ensure prebuilt binaries are linked correctly in BoardConfig
-          sed -i 's|$(DEVICE_PATH)/prebuilt/kernel|$(DEVICE_PATH)/kernel|g' BoardConfig.mk || true
-          
-          # Patching Display Resolution (1080x2460)
-          sed -i '/TARGET_SCREEN_HEIGHT/d' BoardConfig.mk || true
-          echo "TARGET_SCREEN_HEIGHT := 2460" >> BoardConfig.mk
-          echo "TARGET_SCREEN_WIDTH := 1080" >> BoardConfig.mk
-
-      - name: 🔨 AI Compilation Dispatch
-        run: |
-          cd work/fox_root
-          export ALLOW_MISSING_DEPENDENCIES=true
-          source build/envsetup.sh
-          
-          # Lunch Strategy based on Photo's mk file
-          lunch omni_TECNO_KI8-eng || lunch twrp_KI8-eng
-          
-          mka recoveryimage -j$(nproc --all)
-
-      - name: 📦 Upload Final Recovery
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: OrangeFox-KI8-Verified
-          path: |
-            work/fox_root/out/target/product/KI8/*.img
-            work/fox_root/out/target/product/KI8/*.zip
-            
