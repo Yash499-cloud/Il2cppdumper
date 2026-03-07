@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Absolute-Final-Fix)
+name: OrangeFox - Build KI8 (Fast-Fix)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     name: Build OFRP by ${{ github.actor }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # 24.04 ki jagah stable 22.04 use kar rahe hain
     if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -21,7 +21,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Maximize Disk Space
       uses: rokibhasansagar/slimhub_actions@main
@@ -31,16 +31,16 @@ jobs:
       with:
         swap-size-gb: 24
       
-    - name: Install Environment
+    - name: Fast Environment Setup
       run: |
         sudo apt update
-        sudo apt install -y git python3 bc build-essential zip curl libncurses-dev rsync wget
+        # Sirf zaruri tools, koi upgrade ya faltu graphics nahi
+        sudo apt install -y git python3 bc build-essential zip curl libncurses5 rsync wget libssl-dev
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts && sudo bash setup/android_build_env.sh
       
-    - name: Sync Source & Clone Tree (Merged Step)
+    - name: Sync Source & Clone Tree
       run: |
-        # Step 1: Syncing
         mkdir -p ${GITHUB_WORKSPACE}/work
         cd ${GITHUB_WORKSPACE}/work
         git config --global user.name "Yash499"
@@ -49,57 +49,43 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
         
-        # Step 2: Verification (Is the folder there?)
-        if [ ! -d "${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}" ]; then
-          echo "ERROR: Sync folder not created. Retrying manual directory creation..."
-          mkdir -p ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
-        fi
-        
-        # Step 3: Clone Device Tree
+        # Move to fox root and clone tree
         cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
-        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }} || echo "Tree already exists or failed to clone"
+        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
 
     - name: Building OrangeFox
       run: |
-        # Logic: Pehle check karo folder hai ya nahi
-        if [ ! -d "${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}/build" ]; then
-           echo "Build system not found. Sync probably failed."
-           exit 1
-        fi
-        
         cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
         
-        # UI/Theme Fix
-        BC_PATH="${{ env.DEVICE_PATH }}/BoardConfig.mk"
-        echo "TARGET_SCREEN_HEIGHT := 2460" >> $BC_PATH
-        echo "TARGET_SCREEN_WIDTH := 1080" >> $BC_PATH
-        echo "TW_THEME := portrait_hdpi" >> $BC_PATH
+        # KI8 specific BoardConfig fixes on-the-fly
+        sed -i '/TARGET_SCREEN_HEIGHT/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
+        echo "TARGET_SCREEN_HEIGHT := 2460" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
+        echo "TARGET_SCREEN_WIDTH := 1080" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
+        echo "TW_THEME := portrait_hdpi" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
         
         lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
         mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
 
-    - name: Release Artifacts
+    - name: Release Files
       if: always()
       run: |
-        # Intelligent search for the image file
         cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
-        FIND_IMG=$(find out/target/product/${{ env.DEVICE_NAME }} -name "OrangeFox*.img" | head -n 1)
-        if [ -n "$FIND_IMG" ]; then
-           mkdir -p ${GITHUB_WORKSPACE}/output
-           cp $FIND_IMG ${GITHUB_WORKSPACE}/output/recovery.img
-           cp out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip ${GITHUB_WORKSPACE}/output/ 2>/dev/null || true
-           echo "FILE_READY=true" >> $GITHUB_ENV
+        OUT_PATH="out/target/product/${{ env.DEVICE_NAME }}"
+        if [ -f $OUT_PATH/OrangeFox*.img ]; then
+           mkdir -p ${GITHUB_WORKSPACE}/upload
+           cp $OUT_PATH/OrangeFox*.img ${GITHUB_WORKSPACE}/upload/
+           cp $OUT_PATH/OrangeFox*.zip ${GITHUB_WORKSPACE}/upload/
+           echo "BUILD_OK=true" >> $GITHUB_ENV
         fi
 
     - name: Upload to Release
-      if: env.FILE_READY == 'true'
-      uses: softprops/action-gh-release@v1
+      if: env.BUILD_OK == 'true'
+      uses: softprops/action-gh-release@v2
       with:
-        files: ${GITHUB_WORKSPACE}/output/*
-        name: OrangeFox Recovery KI8 // ${{ github.run_id }}
+        files: ${GITHUB_WORKSPACE}/upload/*
+        name: OrangeFox KI8 Final // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: "Build successful for Camon 19 Neo (KI8)."
         
