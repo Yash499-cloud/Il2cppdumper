@@ -61,66 +61,21 @@ jobs:
           set -e
           echo "⚙️ Updating package lists..."
           sudo apt update
-          
-          echo "⚙️ Installing build dependencies for Ubuntu 24.04..."
           sudo apt install -y \
-            git-core \
-            gnupg \
-            flex \
-            bison \
-            build-essential \
-            zip \
-            curl \
-            zlib1g-dev \
-            gcc-multilib \
-            g++-multilib \
-            libc6-dev-i386 \
-            libncurses-dev \
-            lib32ncurses-dev \
-            x11proto-core-dev \
-            libx11-dev \
-            lib32z1-dev \
-            libgl1-mesa-dev \
-            libxml2-utils \
-            xsltproc \
-            unzip \
-            fontconfig \
-            python3 \
-            python3-pip \
-            openjdk-11-jdk \
-            patchelf \
-            bc \
-            cpio \
-            dosfstools \
-            e2fsprogs \
-            f2fs-tools \
-            gperf \
-            libelf-dev \
-            liblz4-tool \
-            libsdl1.2-dev \
-            libssl-dev \
-            lzop \
-            mkbootimg \
-            pngcrush \
-            schedtool \
-            squashfs-tools \
-            xsltproc \
-            zlib1g-dev \
+            git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+            gcc-multilib g++-multilib libc6-dev-i386 libncurses-dev lib32ncurses-dev \
+            x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils \
+            xsltproc unzip fontconfig python3 python3-pip openjdk-11-jdk patchelf \
+            bc cpio dosfstools e2fsprogs f2fs-tools gperf libelf-dev liblz4-tool \
+            libsdl1.2-dev libssl-dev lzop mkbootimg pngcrush schedtool squashfs-tools \
             libwxgtk3.2-dev
-
-          echo "✅ Build dependencies installed successfully."
 
       - name: Install repo tool
         run: |
-          if ! command -v repo &> /dev/null; then
-            echo "📦 Installing repo tool manually..."
-            mkdir -p ~/bin
-            curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-            chmod a+x ~/bin/repo
-            echo "$HOME/bin" >> $GITHUB_PATH
-          else
-            echo "✅ repo already installed."
-          fi
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
 
       - name: Clone OrangeFox Sync Script
         run: |
@@ -134,129 +89,29 @@ jobs:
 
       - name: Clean Build (if selected)
         if: github.event.inputs.clean_build == 'true'
-        run: |
-          rm -rf ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out
-          echo "✅ Clean build enabled - out directory removed"
+        run: rm -rf ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out
 
-      - name: Clone Device Tree and Auto-Fix
+      - name: Clone Device Tree
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
           rm -rf ./${{ env.DEVICE_PATH }}
           git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
           cd ./${{ env.DEVICE_PATH }}
-          echo "🔧 Auto-repairing device tree..."
           rm -f vendorsetup.sh
-          if [ ! -f AndroidProducts.mk ]; then
-            echo "PRODUCT_MAKEFILES := \$(LOCAL_DIR)/${{ env.PRODUCT_NAME }}.mk" > AndroidProducts.mk
-          fi
-          if ! grep -q "COMMON_LUNCH_CHOICES" AndroidProducts.mk; then
-            echo "" >> AndroidProducts.mk
-            echo "# Lunch choices" >> AndroidProducts.mk
-            echo "COMMON_LUNCH_CHOICES := ${{ env.PRODUCT_NAME }}-userdebug ${{ env.PRODUCT_NAME }}-eng" >> AndroidProducts.mk
-          fi
-          if [ ! -f device.mk ]; then
-            echo "# Device makefile for Tecno KI8" > device.mk
-            echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)" >> device.mk
-            echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)" >> device.mk
-            echo "" >> device.mk
-            echo "# Inherit from common" >> device.mk
-            echo "\$(call inherit-product, device/tecno/KI8/BoardConfig.mk)" >> device.mk
-            echo "" >> device.mk
-            echo "# Product names" >> device.mk
-            echo "PRODUCT_NAME := ${{ env.PRODUCT_NAME }}" >> device.mk
-            echo "PRODUCT_DEVICE := ${{ env.DEVICE_NAME }}" >> device.mk
-            echo "PRODUCT_BRAND := Tecno" >> device.mk
-            echo "PRODUCT_MODEL := ${{ env.DEVICE_NAME }}" >> device.mk
-            echo "PRODUCT_MANUFACTURER := Tecno" >> device.mk
-          fi
-          if [ ! -f BoardConfig.mk ]; then
-            echo "# BoardConfig.mk for Tecno KI8" > BoardConfig.mk
-            echo "TARGET_NO_BOOTLOADER := true" >> BoardConfig.mk
-            echo "TARGET_NO_RADIOIMAGE := true" >> BoardConfig.mk
-            echo "TARGET_ARCH := arm64" >> BoardConfig.mk
-            echo "TARGET_ARCH_VARIANT := armv8-a" >> BoardConfig.mk
-            echo "TARGET_CPU_ABI := arm64-v8a" >> BoardConfig.mk
-            echo "TARGET_CPU_ABI2 :=" >> BoardConfig.mk
-            echo "TARGET_CPU_VARIANT := cortex-a53" >> BoardConfig.mk
-            echo "TARGET_2ND_ARCH := arm" >> BoardConfig.mk
-            echo "TARGET_2ND_ARCH_VARIANT := armv7-a-neon" >> BoardConfig.mk
-            echo "TARGET_2ND_CPU_ABI := armeabi-v7a" >> BoardConfig.mk
-            echo "TARGET_2ND_CPU_ABI2 := armeabi" >> BoardConfig.mk
-            echo "TARGET_2ND_CPU_VARIANT := cortex-a53" >> BoardConfig.mk
-            echo "TARGET_USES_64_BIT_BINDER := true" >> BoardConfig.mk
-            echo "TARGET_SUPPORTS_64_BIT_APPS := true" >> BoardConfig.mk
-            echo "TARGET_SUPPORTS_32_BIT_APPS := true" >> BoardConfig.mk
-            echo "" >> BoardConfig.mk
-            echo "# Kernel" >> BoardConfig.mk
-            echo "BOARD_KERNEL_CMDLINE := bootopt=64S3,32N2,64N2" >> BoardConfig.mk
-            echo "BOARD_KERNEL_BASE := 0x40078000" >> BoardConfig.mk
-            echo "BOARD_KERNEL_OFFSET := 0x00008000" >> BoardConfig.mk
-            echo "BOARD_KERNEL_PAGESIZE := 2048" >> BoardConfig.mk
-            echo "BOARD_KERNEL_TAGS_OFFSET := 0x0bc08000" >> BoardConfig.mk
-            echo "BOARD_RAMDISK_OFFSET := 0x07c08000" >> BoardConfig.mk
-            echo "BOARD_DTB_OFFSET := 0x0bc08000" >> BoardConfig.mk
-            echo "BOARD_BOOT_HEADER_VERSION := 2" >> BoardConfig.mk
-            echo "BOARD_KERNEL_IMAGE_NAME := Image" >> BoardConfig.mk
-            echo "BOARD_KERNEL_SEPARATED_DTBO := true" >> BoardConfig.mk
-            echo "" >> BoardConfig.mk
-            echo "# Partitions" >> BoardConfig.mk
-            echo "BOARD_FLASH_BLOCK_SIZE := 131072" >> BoardConfig.mk
-            echo "BOARD_BOOTIMAGE_PARTITION_SIZE := 33554432" >> BoardConfig.mk
-            echo "BOARD_RECOVERYIMAGE_PARTITION_SIZE := 33554432" >> BoardConfig.mk
-            echo "BOARD_SUPER_PARTITION_SIZE := 9126805504" >> BoardConfig.mk
-            echo "BOARD_SUPER_PARTITION_GROUPS := main" >> BoardConfig.mk
-            echo "BOARD_MAIN_SIZE := 9126805504" >> BoardConfig.mk
-            echo "BOARD_MAIN_PARTITION_LIST := system vendor product" >> BoardConfig.mk
-            echo "" >> BoardConfig.mk
-            echo "# Recovery" >> BoardConfig.mk
-            echo "BOARD_USES_RECOVERY_AS_BOOT := true" >> BoardConfig.mk
-            echo "BOARD_SUPPRESS_SECURE_ERASE := true" >> BoardConfig.mk
-            echo "TARGET_NO_RECOVERY := false" >> BoardConfig.mk
-            echo "TARGET_RECOVERY_FSTAB := device/tecno/KI8/recovery.fstab" >> BoardConfig.mk
-            echo "TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888" >> BoardConfig.mk
-            echo "TARGET_USERIMAGES_USE_EXT4 := true" >> BoardConfig.mk
-            echo "TARGET_USERIMAGES_USE_F2FS := true" >> BoardConfig.mk
-            echo "" >> BoardConfig.mk
-            echo "# OFRP Specific" >> BoardConfig.mk
-            echo "OF_TARGET_DEVICE_ALT := KI8,TECNO-KI8" >> BoardConfig.mk
-            echo "OF_MAINTAINER := Samuel Kendall" >> BoardConfig.mk
-            echo "OF_STATUS := Unofficial" >> BoardConfig.mk
-            echo "TW_THEME := portrait_hdpi" >> BoardConfig.mk
-            echo "TW_BRIGHTNESS_PATH := /sys/class/leds/lcd-backlight/brightness" >> BoardConfig.mk
-            echo "TW_DEFAULT_BRIGHTNESS := 1200" >> BoardConfig.mk
-            echo "TW_EXCLUDE_DEFAULT_USB_INIT := true" >> BoardConfig.mk
-            echo "TW_EXTRA_LANGUAGES := true" >> BoardConfig.mk
-            echo "TW_INCLUDE_CRYPTO := true" >> BoardConfig.mk
-            echo "TW_INCLUDE_FBE := true" >> BoardConfig.mk
-            echo "TW_INCLUDE_FBE_METADATA_DECRYPT := true" >> BoardConfig.mk
-            echo "TW_INCLUDE_NTFS_3G := true" >> BoardConfig.mk
-            echo "TW_INCLUDE_RESETPROP := true" >> BoardConfig.mk
-            echo "TW_USE_TOOLBOX := true" >> BoardConfig.mk
-            echo "TW_NO_SCREEN_TIMEOUT := true" >> BoardConfig.mk
-          fi
-          if [ ! -f recovery.fstab ]; then
-            echo "# Android fstab file for Tecno KI8" > recovery.fstab
-            echo "#<src>                    <mnt_point>         <type>    <mnt_flags>               <fs_mgr_flags>" >> recovery.fstab
-            echo "/dev/block/by-name/system  /system              ext4      ro,barrier=1             wait,slotselect,avb" >> recovery.fstab
-            echo "/dev/block/by-name/vendor  /vendor              ext4      ro,barrier=1             wait,slotselect,avb" >> recovery.fstab
-            echo "/dev/block/by-name/product /product             ext4      ro,barrier=1             wait,slotselect,avb" >> recovery.fstab
-            echo "/dev/block/by-name/userdata /data               f2fs      nosuid,nodev,noatime,discard    wait,check,quota,formattable,fileencryption=ice" >> recovery.fstab
-            echo "/dev/block/by-name/cache   /cache               ext4      nosuid,nodev,noatime     wait,check,formattable" >> recovery.fstab
-            echo "/dev/block/by-name/metadata /metadata           ext4      nosuid,nodev,noatime     wait,formattable" >> recovery.fstab
-            echo "/dev/block/by-name/boot    /boot                emmc      defaults                 defaults" >> recovery.fstab
-            echo "/dev/block/by-name/recovery /recovery            emmc      defaults                 defaults" >> recovery.fstab
-            echo "/dev/block/by-name/misc    /misc                emmc      defaults                 defaults" >> recovery.fstab
-          fi
-          if [ ! -d prebuilt ]; then
-            mkdir -p prebuilt
-            echo "⚠️ prebuilt folder created. Please add kernel and dtb files."
-          fi
-          if [ ! -d recovery/root ]; then
-            mkdir -p recovery/root
-            touch recovery/root/.placeholder
-          fi
-          echo "✅ Device tree ready!"
           echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      # 🔥 DEBUG STEP: Pehle lunch ki poori configuration check karo
+      - name: 🔍 DEBUG - Check Device Tree Files
+        run: |
+          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/device/tecno/KI8
+          echo "=== 📄 AndroidProducts.mk ==="
+          cat AndroidProducts.mk
+          echo "=== 📄 omni_TECNO_KI8.mk ==="
+          cat omni_TECNO_KI8.mk
+          echo "=== 📄 device.mk ==="
+          cat device.mk
+          echo "=== 📄 BoardConfig.mk (first 20 lines) ==="
+          head -20 BoardConfig.mk
 
       - name: Build OrangeFox Recovery
         run: |
@@ -271,18 +126,33 @@ jobs:
           echo "📱 Available targets:"
           print_lunch_menu
           
-          echo "🔨 Running lunch command with full debug..."
-          # Direct product name use kar rahe hain variable ki jagah
+          # 🔥 DEBUG: Poori lunch command with full trace
+          echo "🔨 Running lunch with full trace..."
+          set -x  # Enable command tracing
           lunch omni_TECNO_KI8-eng 2>&1 | tee lunch.log
+          set +x  # Disable tracing
           
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ Lunch failed! Puri lunch.log niche di gayi hai:"
+          # Check exit status
+          LUNCH_EXIT=${PIPESTATUS[0]}
+          if [ $LUNCH_EXIT -ne 0 ]; then
+            echo "❌ Lunch failed with exit code: $LUNCH_EXIT"
+            echo "📄 Full lunch.log:"
             cat lunch.log
-            echo "⚙️ Alternative method try kar rahe hain..."
-            . build/envsetup.sh
-            lunch
+            
+            # 🔥 EXTRA DEBUG: Check why lunch failed
+            echo "🔍 Checking device directory..."
+            ls -la device/tecno/KI8/
+            
+            echo "🔍 Checking if product name exists in AndroidProducts.mk..."
+            grep -n "omni_TECNO_KI8" device/tecno/KI8/AndroidProducts.mk || echo "❌ Not found!"
+            
+            echo "🔍 Checking if omni_TECNO_KI8.mk exists..."
+            ls -la device/tecno/KI8/omni_TECNO_KI8.mk || echo "❌ Missing!"
+            
             exit 1
           fi
+          
+          echo "✅ Lunch successful!"
           
           echo "⚙️ Starting build..."
           if [[ "${{ github.event.inputs.build_type }}" == "boot" ]]; then
@@ -291,8 +161,9 @@ jobs:
             mka recoveryimage -j$(nproc --all) 2>&1 | tee build.log
           fi
           
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ Build failed! Akhri 50 lines build.log se:"
+          BUILD_EXIT=${PIPESTATUS[0]}
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "❌ Build failed! Last 50 lines of build.log:"
             tail -50 build.log
             exit 1
           fi
@@ -313,7 +184,6 @@ jobs:
           elif [ -f "boot.img" ]; then cp boot.img OrangeFox-boot.img
           else
             echo "❌ No image found!"
-            ls -la *.img 2>/dev/null || echo "No .img files"
             exit 1
           fi
           echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
@@ -323,8 +193,6 @@ jobs:
         if: env.CHECK_IMG_IS_OK == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            ${{ env.FILE_PATH }}/OrangeFox*.img
+          files: ${{ env.FILE_PATH }}/OrangeFox*.img
           name: Unofficial OrangeFox for KI8 // ${{ env.COMMIT_ID }}
           tag_name: ${{ github.run_id }}
-          generate_release_notes: true
