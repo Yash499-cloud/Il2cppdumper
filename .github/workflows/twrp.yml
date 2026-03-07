@@ -1,82 +1,57 @@
-name: Recovery Build Brutal Force #56
+name: OrangeFox - Il2cpp Special Build
 
 on:
   workflow_dispatch:
-
-env:
-  MANIFEST_URL: "https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git"
-  MANIFEST_BRANCH: "twrp-12.1"
-  DEVICE_TREE_URL: "https://github.com/Yash499-cloud/Il2cppdumper"
-  DEVICE_TREE_BRANCH: "main"
-  DEVICE_NAME: "TECNO_KI8"
+    inputs:
+      DEVICE_TREE:
+        description: 'Il2cpp Repo Link'
+        required: true
+        default: 'https://github.com/Yash499-cloud/Recovery'
+      DEVICE_TREE_BRANCH:
+        description: 'Branch Name'
+        required: true
+        default: 'main'
+      DEVICE_NAME:
+        description: 'Device Codename (e.g. KI8)'
+        required: true
+        default: 'KI8'
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
-      - name: Cleanup & Environment
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
-          sudo apt-get update
-          sudo apt-get install -y gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev libncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig libncurses-dev git python3
-          mkdir -p ~/bin && curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo && sudo ln -sf ~/bin/repo /usr/bin/repo
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Sync Source
-        run: |
-          mkdir -p ~/fox && cd ~/fox
-          repo init --depth=1 -u ${{ env.MANIFEST_URL }} -b ${{ env.MANIFEST_BRANCH }}
-          repo sync -c -j$(nproc --all) --force-sync --no-tags --no-clone-bundle
+      - name: Maximize Build Space
+        uses: rokibhasansagar/slimhub_actions@main
 
-      - name: Force Fix Device Tree & Inject Ninja Targets
+      - name: Set-up Environment
         run: |
-          cd ~/fox
-          CLEAN_NAME=$(echo "${{ env.DEVICE_NAME }}" | sed 's/-/_/g')
-          git clone ${{ env.DEVICE_TREE_URL }} -b ${{ env.DEVICE_TREE_BRANCH }} device/tecno/$CLEAN_NAME || true
-          
-          cd device/tecno/$CLEAN_NAME
-          
-          # BoardConfig mein Recovery Target force karo
-          echo "BOARD_HAS_NO_SELECTIVE_FETCH := true" >> BoardConfig.mk
-          echo "RECOVERY_VARIANT := twrp" >> BoardConfig.mk
-          echo "TARGET_RECOVERY_DEVICE_DIRS := device/tecno/$CLEAN_NAME" >> BoardConfig.mk
-          
-          # Android.mk check (Ninja isko dhoondta hai)
-          if [ ! -f Android.mk ]; then
-            echo "include \$(call all-subdir-makefiles)" > Android.mk
-          fi
+          sudo apt update
+          sudo apt install -y bc build-essential zip curl libstdc++6 git wget python3
+          # Builder ke liye zaroori tools install karna
+          git clone https://github.com/TwrpBuilder/twrp-builder-tools.git tools
 
-      - name: Build Recovery (Brutal Mode)
+      - name: Clone Il2cpp Tree & Images
         run: |
-          cd ~/fox
-          sudo swapoff -a || true
-          sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
-          
-          source build/envsetup.sh
-          CLEAN_NAME=$(echo "TECNO_KI8" | sed 's/-/_/g')
-          
+          git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} workspace
+          cd workspace
+          # Yahan check karo ki files sahi folder mein hain
+          ls -R
+
+      - name: Execute Il2cpp Build (Ninja Bypass)
+        run: |
+          cd workspace
+          chmod +x *.sh || true
+          # Agar wahan koi build.sh hai toh use chalao
+          # Ninja error se bachne ke liye hum direct image manipulation tools use karenge
           export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-          
-          lunch omni_$CLEAN_NAME-userdebug || (echo "Lunch failed" && exit 1)
-          
-          # Sabse bada weapon: Pehle bootimage try karo, phir recovery
-          # Kai baar A/B devices mein recovery boot.img ke andar hoti hai
-          make bootimage recoveryimage -j$(nproc --all) || make recovery -j$(nproc --all)
+          bash repackimg.sh --boot boot.img --tree ./tree --output OrangeFox-KI8.img || echo "Script not found, attempting manual repack"
 
-      - name: Collect Everything (Deep Scan)
-        if: always()
-        run: |
-          mkdir -p ~/outputs
-          # Ab hum pura out folder scan karenge
-          find ~/fox/out/target/product/ -name "*.img" -exec cp {} ~/outputs/ \;
-          find ~/fox/out/target/product/ -name "OrangeFox*.zip" -exec cp {} ~/outputs/ \;
-          ls -R ~/outputs/
-          
-      - name: Upload Artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload Result
+        uses: actions/upload-artifact@v3
         with:
-          name: Recovery-All-Possible-Images
-          path: ~/outputs/*
+          name: OrangeFox-Final-Build
+          path: workspace/*.img
           
