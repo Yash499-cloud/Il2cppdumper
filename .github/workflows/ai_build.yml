@@ -9,8 +9,8 @@ on:
         default: 'Official-Like'
         type: choice
         options:
-        - Official-Like
-        - Experimental-MTK
+          - Official-Like
+          - Experimental-MTK
       clean_sync:
         description: 'Force Clean Sync?'
         required: false
@@ -35,148 +35,161 @@ jobs:
       contents: write
 
     steps:
+      # ===============================
+      # PHASE 1: ENVIRONMENT
+      # ===============================
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
-# ===============================
-# PHASE 1 ENVIRONMENT
-# ===============================
+      - name: Disk Cleanup
+        run: |
+          echo "::group::Disk"
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+          sudo apt-get clean
+          docker image prune -a -f || true
+          df -h
+          echo "::endgroup::"
 
-    - name: Checkout Repo
-      uses: actions/checkout@v4
+      # ===============================
+      # PHASE 2: DEPENDENCIES + REPO TOOL
+      # ===============================
+      - name: Install Dependencies
+        run: |
+          echo "::group::Deps"
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            git-core gnupg flex bison gperf build-essential \
+            zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+            lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
+            libgl1-mesa-dev libxml2-utils xsltproc unzip bc rsync \
+            schedtool libssl-dev libreadline-dev libncurses5-dev \
+            lib32stdc++6 libelf-dev python3 openjdk-11-jdk \
+            p7zip-full imagemagick wget
 
-    - name: Disk Cleanup
-      run: |
-        df -h
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo apt-get clean
-        docker image prune -a -f
-        df -h
+          # Install Android repo tool
+          sudo mkdir -p /usr/local/bin
+          sudo curl https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
+          sudo chmod a+x /usr/local/bin/repo
 
-# ===============================
-# PHASE 2 DEPENDENCIES
-# ===============================
+          repo --version
+          echo "::endgroup::"
 
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update -y
-        sudo apt-get install -y \
-        git-core gnupg flex bison gperf build-essential \
-        zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
-        lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
-        libgl1-mesa-dev libxml2-utils xsltproc unzip bc rsync \
-        schedtool libssl-dev libreadline-dev libncurses5-dev \
-        lib32stdc++6 libelf-dev python3 openjdk-11-jdk \
-        p7zip-full imagemagick wget
+      # ===============================
+      # PHASE 3: ORANGEFOX SOURCE SYNC
+      # ===============================
+      - name: OrangeFox Source Sync
+        run: |
+          echo "::group::Sync"
+          mkdir work
+          cd work
 
-# ===============================
-# PHASE 3 SOURCE SYNC
-# ===============================
+          git config --global user.name "${{ env.MAINTAINER }}"
+          git config --global user.email "ai@build-engine.com"
 
-    - name: OrangeFox Source Sync
-      run: |
-        mkdir work
-        cd work
+          git clone ${{ env.SYNC_URL }} sync_logic
+          cd sync_logic
 
-        git config --global user.name "${{ env.MAINTAINER }}"
-        git config --global user.email "ai@build-engine.com"
+          chmod +x orangefox_sync.sh
+          ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_root
 
-        git clone ${{ env.SYNC_URL }} sync_logic
-        cd sync_logic
+          if [ ! -d "../fox_root/build" ]; then
+            echo "SYNC FAILED"
+            exit 1
+          fi
+          echo "::endgroup::"
 
-        chmod +x orangefox_sync.sh
-        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_root
+      # ===============================
+      # PHASE 4: DEVICE TREE
+      # ===============================
+      - name: Clone Device Tree
+        run: |
+          echo "::group::Tree"
+          cd work/fox_root
 
-        if [ ! -d "../fox_root/build" ]; then
-          echo "SYNC FAILED"
-          exit 1
-        fi
+          mkdir -p ${{ env.DEVICE_PATH }}
+          git clone ${{ env.TREE_URL }} ./${{ env.DEVICE_PATH }}
 
-# ===============================
-# PHASE 4 DEVICE TREE
-# ===============================
+          cd ${{ env.DEVICE_PATH }}
 
-    - name: Clone Device Tree
-      run: |
-        cd work/fox_root
+          if [ -f "tecno_tree.zip" ]; then
+            unzip -o tecno_tree.zip
+            rm tecno_tree.zip
+          fi
+          echo "::endgroup::"
 
-        mkdir -p ${{ env.DEVICE_PATH }}
+      # ===============================
+      # PHASE 5: MTK PATCH
+      # ===============================
+      - name: MTK Hardware Patch
+        run: |
+          echo "::group::Patch"
+          cd work/fox_root/${{ env.DEVICE_PATH }}
 
-        git clone ${{ env.TREE_URL }} ./${{ env.DEVICE_PATH }}
+          if [ -f BoardConfig.mk ]; then
+            sed -i '/TARGET_SCREEN_HEIGHT/d' BoardConfig.mk || true
+            sed -i '/TARGET_SCREEN_WIDTH/d' BoardConfig.mk || true
 
-        cd ${{ env.DEVICE_PATH }}
+            echo "TARGET_SCREEN_HEIGHT := 2460" >> BoardConfig.mk
+            echo "TARGET_SCREEN_WIDTH := 1080" >> BoardConfig.mk
+            echo "TW_THEME := portrait_hdpi" >> BoardConfig.mk
+            echo "BOARD_HAS_NO_REAL_SDCARD := true" >> BoardConfig.mk
+            echo "RECOVERY_SDCARD_ON_DATA := true" >> BoardConfig.mk
+          fi
+          echo "::endgroup::"
 
-        if [ -f "tecno_tree.zip" ]; then
-          unzip -o tecno_tree.zip
-          rm tecno_tree.zip
-        fi
+      # ===============================
+      # PHASE 6: BUILD
+      # ===============================
+      - name: Compile Recovery
+        run: |
+          echo "::group::Build"
+          cd work/fox_root
 
-# ===============================
-# PHASE 5 AUTO PATCH
-# ===============================
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+          export OF_AB_DEVICE=1
+          export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
 
-    - name: MTK Hardware Fix
-      run: |
-        cd work/fox_root/${{ env.DEVICE_PATH }}
+          source build/envsetup.sh
 
-        if [ -f BoardConfig.mk ]; then
-          sed -i '/TARGET_SCREEN_HEIGHT/d' BoardConfig.mk
-          sed -i '/TARGET_SCREEN_WIDTH/d' BoardConfig.mk
+          DETECTED_ID=$(grep -r "PRODUCT_DEVICE" ${{ env.DEVICE_PATH }} | head -n 1 | awk '{print $NF}')
+          if [ -z "$DETECTED_ID" ]; then
+            DETECTED_ID=${{ env.DEVICE_NAME }}
+          fi
 
-          echo "TARGET_SCREEN_HEIGHT := 2460" >> BoardConfig.mk
-          echo "TARGET_SCREEN_WIDTH := 1080" >> BoardConfig.mk
-          echo "TW_THEME := portrait_hdpi" >> BoardConfig.mk
-          echo "BOARD_HAS_NO_REAL_SDCARD := true" >> BoardConfig.mk
-          echo "RECOVERY_SDCARD_ON_DATA := true" >> BoardConfig.mk
-        fi
+          lunch twrp_$DETECTED_ID-eng || lunch omni_$DETECTED_ID-eng || exit 1
 
-# ===============================
-# PHASE 6 BUILD
-# ===============================
+          mka recoveryimage -j$(nproc) 2>&1 | tee build_log.txt
 
-    - name: Compile Recovery
-      run: |
-        cd work/fox_root
+          cp build_log.txt ${{ github.workspace }}/build_log.txt
+          echo "::endgroup::"
 
-        export ALLOW_MISSING_DEPENDENCIES=true
-        export LC_ALL=C
-        export OF_AB_DEVICE=1
-        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
+      # ===============================
+      # PHASE 7: COLLECT ARTIFACT
+      # ===============================
+      - name: Collect Artifacts
+        if: always()
+        run: |
+          echo "::group::Artifacts"
+          mkdir output
+          cd work/fox_root
 
-        source build/envsetup.sh
+          find out/target/product/ -name "*.img" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+          find out/target/product/ -name "*.zip" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+          echo "::endgroup::"
 
-        DETECTED_ID=$(grep -r "PRODUCT_DEVICE" ${{ env.DEVICE_PATH }} | head -n 1 | awk '{print $NF}')
-
-        if [ -z "$DETECTED_ID" ]; then
-          DETECTED_ID=${{ env.DEVICE_NAME }}
-        fi
-
-        lunch twrp_$DETECTED_ID-eng || lunch omni_$DETECTED_ID-eng || exit 1
-
-        mka recoveryimage -j$(nproc) 2>&1 | tee build_log.txt
-
-        cp build_log.txt ${{ github.workspace }}/build_log.txt
-
-# ===============================
-# PHASE 7 ARTIFACT
-# ===============================
-
-    - name: Collect Artifacts
-      if: always()
-      run: |
-        mkdir output
-
-        cd work/fox_root
-
-        find out/target/product/ -name "*.img" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
-        find out/target/product/ -name "*.zip" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
-
-# ===============================
-# PHASE 8 RELEASE
-# ===============================
-
-    - name: Upload Release
-      if: always()
-      uses: softprops/action-gh-release@v2
-      with:
-        files: output/*
-        tag_name: ${{ github.run_id }}
-        name: OrangeFox KI8 Build
+      # ===============================
+      # PHASE 8: RELEASE
+      # ===============================
+      - name: Upload Release
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          files: output/*
+          tag_name: ${{ github.run_id }}
+          name: OrangeFox KI8 Build
+          body: |
+            Device: Tecno KI8 (Camon 19 Neo)
+            Maintainer: Yash499-cloud
+            Build System: GitHub Actions
