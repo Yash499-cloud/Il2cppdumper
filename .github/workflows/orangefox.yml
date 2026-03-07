@@ -1,0 +1,80 @@
+name: OrangeFox - Build (Automated for Tecno KI8)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build OFRP for Tecno KI8
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MANIFEST_BRANCH: '12.1'
+      DEVICE_TREE: 'https://github.com/Yash499-cloud/il2cppdumper'
+      DEVICE_TREE_BRANCH: 'main'
+      DEVICE_PATH: 'device/tecno/KI8'
+      DEVICE_NAME: 'KI8'
+      PRODUCT_NAME: 'omni_TECNO_KI8'
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Clean-up
+      uses: rokibhasansagar/slimhub_actions@main
+
+    - name: Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+      
+    - name: Build Environment
+      run: |
+        sudo apt update
+        sudo apt -y upgrade
+        git clone https://gitlab.com/OrangeFox/misc/scripts
+        cd scripts
+        sudo bash setup/android_build_env.sh
+      
+    - name: Set-up Manifest
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+        cd ${GITHUB_WORKSPACE}/OrangeFox
+        git config --global user.name "Samuel Kendall"
+        git config --global user.email "kinguser981@gmail.com"
+        git clone https://gitlab.com/OrangeFox/sync.git
+        cd sync
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+
+    - name: Clone Device Tree
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Yash499-cloud/il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+    - name: Building OrangeFox
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_12.1
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        lunch ${{ env.PRODUCT_NAME }}-eng
+        make clean
+        mka adbd recoveryimage
+
+    - name: Check and Release
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_12.1/out/target/product/KI8 || cd ${GITHUB_WORKSPACE}/OrangeFox/fox_12.1/out/target/product/TECNO_KI8
+        if [ -f OrangeFox*.img ]; then
+            mv OrangeFox*.img recovery.img
+            echo "IMG_FOUND=true" >> $GITHUB_ENV
+            echo "FINAL_PATH=$(pwd)" >> $GITHUB_ENV
+        fi
+
+    - name: Upload to Release
+      if: env.IMG_FOUND == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ env.FINAL_PATH }}/recovery.img
+          ${{ env.FINAL_PATH }}/OrangeFox*.zip
+        name: Unofficial OrangeFox for KI8 // ${{ env.COMMIT_ID }}
+        tag_name: ${{ github.run_id }}
