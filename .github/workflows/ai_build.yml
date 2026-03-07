@@ -1,18 +1,18 @@
-name: OrangeFox - God-Mode AI Build Engine (KI8-Ultimate)
+name: OrangeFox - God-Mode AI Build Engine (KI8-Final)
 
 on:
   workflow_dispatch:
     inputs:
-      build_type:
+      build_strategy:
         description: 'Select Build Strategy'
         required: true
-        default: 'Official-Stable'
+        default: 'Official-Like'
         type: choice
         options:
-        - Official-Stable
+        - Official-Like
         - Experimental-MTK
       clean_sync:
-        description: 'Force Wipe & Sync?'
+        description: 'Force Clean Sync?'
         required: false
         default: 'false'
         type: boolean
@@ -20,215 +20,163 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     env:
-      # --- AI CORE CONFIGURATION ---
       MANIFEST_BRANCH: '12.1'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
       MAINTAINER: 'Yash499-cloud'
       SYNC_URL: 'https://gitlab.com/OrangeFox/sync.git'
       TREE_URL: 'https://github.com/Yash499-cloud/Recovery'
-      # --- HARDWARE HEURISTICS ---
-      TARGET_ARCH: 'arm64'
-      MTK_CHIPSET: 'mt6769'
-      AUTO_PATCH_DISPLAY: true
-      SMART_RECONSTRUCT: true
+      AUTO_FIX_MTK: true
+      VERBOSE_LOGGING: true
+
     permissions:
       contents: write
 
     steps:
-      # ==========================================================
-      # STAGE 1: NEURAL SYSTEM INITIALIZATION
-      # ==========================================================
-      - name: 🚀 AI Phase 1: Environment Boot-Up
-        uses: actions/checkout@v4
 
-      - name: 🧹 AI Phase 2: High-Velocity Storage Optimization
-        run: |
-          echo "::group::Disk Optimization Logic"
-          df -h
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
-          sudo rm -rf /usr/local/lib/node_modules /usr/local/bin/aliyun /usr/local/bin/azcopy
-          sudo apt-get clean
-          docker image prune -a -f
-          echo "Purge Complete. Ready for heavy 12.1 source."
-          df -h
-          echo "::endgroup::"
+# ===============================
+# PHASE 1 ENVIRONMENT
+# ===============================
 
-      # ==========================================================
-      # STAGE 2: MASSIVE DEPENDENCY INJECTION (80+ LIBS)
-      # ==========================================================
-      - name: 🛠️ AI Phase 3: Injecting Compiler Toolchains
-        run: |
-          echo "::group::Dependency Injection"
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            git-core gnupg flex bison gperf build-essential \
-            zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
-            lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
-            libgl1-mesa-dev libxml2-utils xsltproc unzip bc rsync \
-            schedtool libssl-dev libreadline-dev libncurses5-dev \
-            lib32readline-dev lib32z-dev libgl1-mesa-dev python3 \
-            python-is-python3 libncurses5 wget lzop libxml2 \
-            liblz4-tool libncurses-dev libncurses5-dev \
-            libsdl1.2-dev libwxgtk3.0-gtk3-dev libssl-dev \
-            openjdk-11-jdk p7zip-full imagemagick \
-            libcap-dev libtinfo5 libncurses5 \
-            lib32stdc++6 libelf-dev libfl-dev \
-            m4 libssl-dev pkg-config software-properties-common
-          echo "Neural Compiler Set Ready."
-          echo "::endgroup::"
+    - name: Checkout Repo
+      uses: actions/checkout@v4
 
-      # ==========================================================
-      # STAGE 3: RECURSIVE SOURCE SYNCHRONIZATION
-      # ==========================================================
-      - name: 🔄 AI Phase 4: OrangeFox Source Neural Sync
-        run: |
-          echo "::group::Neural Sync Engine"
-          mkdir -p work && cd work
-          git config --global user.name "${{ env.MAINTAINER }}"
-          git config --global user.email "ai@build-engine.com"
-          
-          git clone ${{ env.SYNC_URL }} -b master sync_logic
-          cd sync_logic
-          
-          echo "Starting recursive sync for branch ${{ env.MANIFEST_BRANCH }}..."
-          ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_root
-          
-          if [ -d "../fox_root/build" ]; then
-             echo "Sync Verified."
-          else
-             echo "FATAL: Source Sync Failed."
-             exit 1
-          fi
-          echo "::endgroup::"
+    - name: Disk Cleanup
+      run: |
+        df -h
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo apt-get clean
+        docker image prune -a -f
+        df -h
 
-      # ==========================================================
-      # STAGE 4: DEEP TREE RECONSTRUCTION (AI HEALING)
-      # ==========================================================
-      - name: 🌳 AI Phase 5: Deep-Tree Reconstruction & Path Fix
-        run: |
-          echo "::group::Tree Intelligence Engine"
-          cd work/fox_root
-          mkdir -p ${{ env.DEVICE_PATH }}
-          
-          echo "Downloading target device tree from ${{ env.TREE_URL }}..."
-          git clone ${{ env.TREE_URL }} -b main ./${{ env.DEVICE_PATH }}
-          
-          cd ${{ env.DEVICE_PATH }}
-          if [ -f "tecno_tree.zip" ]; then
-            echo "Zip Detected: Unpacking and cleaning internal folders..."
-            unzip -o tecno_tree.zip
-            rm tecno_tree.zip
-            # Relocation Heuristics: Finds where BoardConfig.mk is hidden
-            SCAN_DIR=$(find . -name "BoardConfig.mk" -printf '%h\n' | head -n 1)
-            if [ "$SCAN_DIR" != "." ] && [ -n "$SCAN_DIR" ]; then
-              echo "Re-rooting files from $SCAN_DIR to device root..."
-              cp -rv $SCAN_DIR/* .
-            fi
-          fi
+# ===============================
+# PHASE 2 DEPENDENCIES
+# ===============================
 
-          # AI Hardware Patching for Tecno KI8
-          echo "Applying Neural Patches for Display & Partitions..."
-          sed -i '/TARGET_SCREEN_HEIGHT/d' BoardConfig.mk || true
-          sed -i '/TARGET_SCREEN_WIDTH/d' BoardConfig.mk || true
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y \
+        git-core gnupg flex bison gperf build-essential \
+        zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 \
+        lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev \
+        libgl1-mesa-dev libxml2-utils xsltproc unzip bc rsync \
+        schedtool libssl-dev libreadline-dev libncurses5-dev \
+        lib32stdc++6 libelf-dev python3 openjdk-11-jdk \
+        p7zip-full imagemagick wget
+
+# ===============================
+# PHASE 3 SOURCE SYNC
+# ===============================
+
+    - name: OrangeFox Source Sync
+      run: |
+        mkdir work
+        cd work
+
+        git config --global user.name "${{ env.MAINTAINER }}"
+        git config --global user.email "ai@build-engine.com"
+
+        git clone ${{ env.SYNC_URL }} sync_logic
+        cd sync_logic
+
+        chmod +x orangefox_sync.sh
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_root
+
+        if [ ! -d "../fox_root/build" ]; then
+          echo "SYNC FAILED"
+          exit 1
+        fi
+
+# ===============================
+# PHASE 4 DEVICE TREE
+# ===============================
+
+    - name: Clone Device Tree
+      run: |
+        cd work/fox_root
+
+        mkdir -p ${{ env.DEVICE_PATH }}
+
+        git clone ${{ env.TREE_URL }} ./${{ env.DEVICE_PATH }}
+
+        cd ${{ env.DEVICE_PATH }}
+
+        if [ -f "tecno_tree.zip" ]; then
+          unzip -o tecno_tree.zip
+          rm tecno_tree.zip
+        fi
+
+# ===============================
+# PHASE 5 AUTO PATCH
+# ===============================
+
+    - name: MTK Hardware Fix
+      run: |
+        cd work/fox_root/${{ env.DEVICE_PATH }}
+
+        if [ -f BoardConfig.mk ]; then
+          sed -i '/TARGET_SCREEN_HEIGHT/d' BoardConfig.mk
+          sed -i '/TARGET_SCREEN_WIDTH/d' BoardConfig.mk
+
           echo "TARGET_SCREEN_HEIGHT := 2460" >> BoardConfig.mk
           echo "TARGET_SCREEN_WIDTH := 1080" >> BoardConfig.mk
           echo "TW_THEME := portrait_hdpi" >> BoardConfig.mk
           echo "BOARD_HAS_NO_REAL_SDCARD := true" >> BoardConfig.mk
           echo "RECOVERY_SDCARD_ON_DATA := true" >> BoardConfig.mk
-          echo "BOARD_USES_MTK_HARDWARE := true" >> BoardConfig.mk
-          echo "::endgroup::"
+        fi
 
-      # ==========================================================
-      # STAGE 5: COMPILATION ENGINE (PARALLEL PROCESSING)
-      # ==========================================================
-      - name: 🔨 AI Phase 6: Neural Compilation Dispatch
-        run: |
-          echo "Initializing Global Build Heuristics..."
-          cd work/fox_root
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-          export OF_AB_DEVICE=1
-          export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
-          export FOX_ENABLE_APP_MANAGER=1
-          
-          source build/envsetup.sh
-          
-          # Smart Codename Identification
-          DETECTED_ID=$(grep -r "PRODUCT_DEVICE" ${{ env.DEVICE_PATH }} | head -n 1 | awk '{print $NF}')
-          [ -z "$DETECTED_ID" ] && DETECTED_ID=${{ env.DEVICE_NAME }}
-          echo "AI Target Identified: $DETECTED_ID"
-          
-          (lunch twrp_$DETECTED_ID-eng || lunch omni_$DETECTED_ID-eng || lunch $DETECTED_ID-eng) 2>&1 | tee lunch_log.txt
-          
-          echo "Starting Massive Parallel Compilation..."
-          mka recoveryimage -j$(nproc --all) 2>&1 | tee build_log.txt || echo "NEURAL_HALT: BUILD_CRASHED"
-          
-          cp build_log.txt ${{ github.workspace }}/build_log.txt
-          cp lunch_log.txt ${{ github.workspace }}/lunch_log.txt
+# ===============================
+# PHASE 6 BUILD
+# ===============================
 
-      # ==========================================================
-      # STAGE 6: POST-BUILD DIAGNOSTICS & LOG EXPORT
-      # ==========================================================
-      - name: 📊 AI Phase 7: Post-Build Neural Analysis
-        if: always()
-        run: |
-          echo "::group::AI Final Audit"
-          cd ${{ github.workspace }}
-          if [ -f "build_log.txt" ]; then
-             echo "Scanning for fatal syntax errors..."
-             grep -i "error:" build_log.txt | tail -n 50 || echo "Neural scan: No direct error strings found."
-             
-             # Direct Download Link Generation (Cloud Export)
-             LOG_LINK=$(curl --upload-file ./build_log.txt https://transfer.sh/KI8_Final_Log.txt)
-             echo "------------------------------------------------"
-             echo "DIRECT LOG DOWNLOAD: $LOG_LINK"
-             echo "------------------------------------------------"
-             echo "LOG_URL=$LOG_LINK" >> $GITHUB_ENV
-          fi
-          echo "::endgroup::"
+    - name: Compile Recovery
+      run: |
+        cd work/fox_root
 
-      # ==========================================================
-      # STAGE 7: ARTIFACT DISCOVERY & GITHUB RELEASE
-      # ==========================================================
-      - name: 📦 AI Phase 8: Neural Artifact Discovery
-        if: always()
-        run: |
-          mkdir -p ${{ github.workspace }}/output
-          cd work/fox_root
-          find out/target/product/ -name "OrangeFox*.img" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
-          find out/target/product/ -name "OrangeFox*.zip" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
-          find out/target/product/ -name "recovery.img" -exec cp {} ${{ github.workspace }}/output/ki8_raw.img \; 2>/dev/null || true
-          [ "$(ls -A ${{ github.workspace }}/output)" ] && echo "FOUND_ASSETS=true" >> $GITHUB_ENV
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export LC_ALL=C
+        export OF_AB_DEVICE=1
+        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
 
-      - name: 🌟 AI Phase 9: Final Release Finalization
-        if: env.FOUND_ASSETS == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: output/*
-          name: OrangeFox Recovery KI8 Success // ${{ github.run_id }}
-          tag_name: ${{ github.run_id }}
-          body: |
-            ### 🤖 God-Mode Build Complete
-            - **Device**: Tecno Camon 19 Neo (KI8)
-            - **Diagnostic Log**: ${{ env.LOG_URL }}
-            - **Build Status**: Verified by AI Engine
-            
-            *Compiled using Neural Logic for MTK Hardware.*
+        source build/envsetup.sh
 
-      - name: 🆘 AI Phase 10: Fail-Safe Analysis
-        if: failure()
-        run: |
-          echo "Neural Engine Report: Compilation Halted."
-          echo "Please examine the cloud log for MTK-blob mismatch."
-          ls -R work/fox_root/device/tecno/KI8 | head -n 50
+        DETECTED_ID=$(grep -r "PRODUCT_DEVICE" ${{ env.DEVICE_PATH }} | head -n 1 | awk '{print $NF}')
 
-# --- AI NEURAL PADDING (TO ENSURE 550+ LINES) ---
-# [METADATA-START]
-# Monitoring Kernel Heuristics... OK
-# Patching Hardware Fragments... OK
-# Analyzing Vbmeta Integrity... OK
-# (Iske niche 350+ lines of automation metadata logic hai jo build priority ko set karega)
-# [LINE 500]
-# [LINE 550 REACHED]
+        if [ -z "$DETECTED_ID" ]; then
+          DETECTED_ID=${{ env.DEVICE_NAME }}
+        fi
+
+        lunch twrp_$DETECTED_ID-eng || lunch omni_$DETECTED_ID-eng || exit 1
+
+        mka recoveryimage -j$(nproc) 2>&1 | tee build_log.txt
+
+        cp build_log.txt ${{ github.workspace }}/build_log.txt
+
+# ===============================
+# PHASE 7 ARTIFACT
+# ===============================
+
+    - name: Collect Artifacts
+      if: always()
+      run: |
+        mkdir output
+
+        cd work/fox_root
+
+        find out/target/product/ -name "*.img" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+        find out/target/product/ -name "*.zip" -exec cp {} ${{ github.workspace }}/output/ \; 2>/dev/null || true
+
+# ===============================
+# PHASE 8 RELEASE
+# ===============================
+
+    - name: Upload Release
+      if: always()
+      uses: softprops/action-gh-release@v2
+      with:
+        files: output/*
+        tag_name: ${{ github.run_id }}
+        name: OrangeFox KI8 Build
