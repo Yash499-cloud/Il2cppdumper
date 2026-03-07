@@ -1,20 +1,17 @@
-name: OrangeFox - Build KI8 (Final-Path-Fix)
+name: OrangeFox - Build KI8 (Diagnostic-Mode)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build OFRP by ${{ github.actor }}
     runs-on: ubuntu-22.04
     if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
-      DEVICE_TREE: 'https://github.com/Yash499-cloud/Recovery'
-      DEVICE_TREE_BRANCH: 'main'
-      DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
+      DEVICE_PATH: 'device/tecno/KI8'
     permissions:
       contents: write
 
@@ -22,78 +19,111 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Maximize Disk Space
-      uses: rokibhasansagar/slimhub_actions@main
-
-    - name: Set Swap Space (24GB)
-      uses: pierotofy/set-swap-space@master
-      with:
-        swap-size-gb: 24
-      
-    - name: Fast Environment Setup
+    - name: System Cleanup
       run: |
-        sudo apt update
-        sudo apt install -y git python3 bc build-essential zip curl libncurses5 rsync wget libssl-dev
+        echo "::group::🧹 Cleaning System"
+        docker image prune -a -f
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android
+        echo "✅ Disk Cleaned"
+        echo "::endgroup::"
+
+    - name: Environment Setup
+      run: |
+        echo "::group::🛠️ Installing Tools"
+        sudo apt update && sudo apt install -y git python3 bc build-essential zip curl libncurses5 rsync wget
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts && sudo bash setup/android_build_env.sh
-      
-    - name: Sync Source & Clone Tree
+        echo "✅ Tools Ready"
+        echo "::endgroup::"
+
+    - name: Sync & Diagnostics
       run: |
-        mkdir -p ${GITHUB_WORKSPACE}/work
-        cd ${GITHUB_WORKSPACE}/work
+        echo "::group::🔄 Syncing Source"
+        mkdir -p work && cd work
         git config --global user.name "Yash499"
         git config --global user.email "yash@example.com"
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
-        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_${{ env.MANIFEST_BRANCH }}
         
-        # Go to the actual source root
-        cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
-        
-        # Logic: Ensure the device path exists before cloning
-        mkdir -p ${{ env.DEVICE_PATH }}
-        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        # Folder Validation
+        if [ -d "../fox_${{ env.MANIFEST_BRANCH }}/build" ]; then
+          echo "✅ Sync Successful: Folder structure exists."
+        else
+          echo "❌ ERROR: Sync failed or incomplete. Folder 'build' missing!"
+          ls -R ..
+          exit 1
+        fi
+        echo "::endgroup::"
 
-    - name: Building OrangeFox
+    - name: Tree Setup & Path Check
       run: |
-        cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
+        echo "::group::🌳 Device Tree Logic"
+        cd work/fox_${{ env.MANIFEST_BRANCH }}
         
-        # Hard Fix for BoardConfig (Ensure we are in the right place)
-        if [ -f ${{ env.DEVICE_PATH }}/BoardConfig.mk ]; then
+        # Clone Tree
+        mkdir -p ${{ env.DEVICE_PATH }}
+        git clone https://github.com/Yash499-cloud/Recovery -b main ./${{ env.DEVICE_PATH }}
+        
+        # Check if Tree is Valid
+        if [ -f "${{ env.DEVICE_PATH }}/BoardConfig.mk" ]; then
+          echo "✅ Device Tree Detected: BoardConfig.mk found."
+          # Apply Patches
           sed -i '/TARGET_SCREEN_HEIGHT/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
-          sed -i '/TARGET_SCREEN_WIDTH/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
           echo "TARGET_SCREEN_HEIGHT := 2460" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
           echo "TARGET_SCREEN_WIDTH := 1080" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
           echo "TW_THEME := portrait_hdpi" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
+          echo "✅ Applied Screen Resolution Patches"
+        else
+          echo "❌ ERROR: Device Tree path is wrong or BoardConfig.mk is missing!"
+          find device -maxdepth 3
+          exit 1
         fi
+        echo "::endgroup::"
 
-        # Source environment
+    - name: Compilation (The Final Boss)
+      run: |
+        echo "🚀 Starting Build Process..."
+        cd work/fox_${{ env.MANIFEST_BRANCH }}
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
         source build/envsetup.sh
         
-        # Try lunch with a fallback to find the target
-        lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng || lunch ${{ env.DEVICE_NAME }}-eng
+        echo "🔍 Trying Lunch..."
+        if lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng; then
+           echo "✅ Lunch Successful!"
+        else
+           echo "❌ ERROR: Lunch failed. Possible invalid vendorsetup.sh or Codename mismatch."
+           exit 1
+        fi
         
+        echo "🔨 Running MKA..."
         mka recoveryimage -j$(nproc --all)
 
-    - name: Release Files
+    - name: Final Artifact Check
       if: always()
       run: |
-        cd ${GITHUB_WORKSPACE}/work/fox_${{ env.MANIFEST_BRANCH }}
-        OUT_PATH="out/target/product/${{ env.DEVICE_NAME }}"
-        if [ -d "$OUT_PATH" ]; then
-           mkdir -p ${GITHUB_WORKSPACE}/upload
-           find $OUT_PATH -name "OrangeFox*.img" -exec cp {} ${GITHUB_WORKSPACE}/upload/ \;
-           find $OUT_PATH -name "OrangeFox*.zip" -exec cp {} ${GITHUB_WORKSPACE}/upload/ \;
-           echo "BUILD_OK=true" >> $GITHUB_ENV
+        echo "::group::📦 Artifact Recovery"
+        cd work/fox_${{ env.MANIFEST_BRANCH }}
+        OUT_DIR="out/target/product/${{ env.DEVICE_NAME }}"
+        
+        if [ -d "$OUT_DIR" ]; then
+           echo "✅ Output Directory Found."
+           ls -lh $OUT_DIR/*.img 2>/dev/null || echo "⚠️ Warning: No .img files found in $OUT_DIR"
+           mkdir -p ${{ github.workspace }}/final
+           cp $OUT_DIR/OrangeFox*.img ${{ github.workspace }}/final/ 2>/dev/null || true
+           cp $OUT_DIR/OrangeFox*.zip ${{ github.workspace }}/final/ 2>/dev/null || true
+        else
+           echo "❌ ERROR: 'out' directory not found. Compilation probably crashed mid-way."
         fi
+        echo "::endgroup::"
 
-    - name: Upload to Release
-      if: env.BUILD_OK == 'true'
+    - name: Release
+      if: github.run_status == 'success'
       uses: softprops/action-gh-release@v2
       with:
-        files: ${GITHUB_WORKSPACE}/upload/*
-        name: OrangeFox KI8 Final // ${{ github.run_id }}
+        files: final/*
+        name: OrangeFox KI8 (Success) // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
+        body: "Build completed successfully with full diagnostic pass."
         
