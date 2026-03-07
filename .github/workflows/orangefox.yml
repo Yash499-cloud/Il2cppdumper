@@ -20,8 +20,6 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v3
-      with:
-        submodules: false # Ghost submodules ko ignore karne ke liye
 
     - name: Clean-up
       uses: rokibhasansagar/slimhub_actions@main
@@ -52,12 +50,14 @@ jobs:
     - name: Clone Device Tree
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Yash499-cloud/Il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        # Cloning to correct path
+        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
         
-        # Cleanup problematic files in device tree
+        # AUTO-REPAIR: Files ko theek karna
         cd ./${{ env.DEVICE_PATH }}
+        # Obsolete lines delete karna
         sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk || true
-        rm -rf .git || true
+        # Agar vendorsetup.sh galti se clone hui to delete karna
         rm -f vendorsetup.sh || true
         
         echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
@@ -65,14 +65,15 @@ jobs:
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # Build environments set up
+        # environment load karna
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         
-        echo "--- Starting Lunch ---"
-        lunch ${{ env.PRODUCT_NAME }}-eng || { echo "Lunch failed"; exit 1; }
+        echo "--- RUNNING LUNCH ---"
+        # Lunch with detailed error capture
+        lunch ${{ env.PRODUCT_NAME }}-eng || { echo "LUNCH_FAILED=true" >> $GITHUB_ENV; lunch ${{ env.PRODUCT_NAME }}-eng; exit 1; }
         
-        echo "--- Starting Build ---"
+        echo "--- STARTING MKA ---"
         mka adbd recoveryimage -j$(nproc --all)
 
     - name: Check and Prepare Files
