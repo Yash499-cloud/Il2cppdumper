@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Updated to v4
 
       - name: Maximize Build Space
         uses: rokibhasansagar/slimhub_actions@main
@@ -30,27 +30,25 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y bc build-essential zip curl libstdc++6 git wget python3
-          # Builder ke liye zaroori tools install karna
           git clone https://github.com/TwrpBuilder/twrp-builder-tools.git tools
 
       - name: Clone Il2cpp Tree & Images
         run: |
           git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} workspace
           cd workspace
-          # Yahan check karo ki files sahi folder mein hain
           ls -R
 
       - name: Execute Il2cpp Build (Ninja Bypass)
         run: |
           cd workspace
           chmod +x *.sh || true
-          # Agar wahan koi build.sh hai toh use chalao
-          # Ninja error se bachne ke liye hum direct image manipulation tools use karenge
           export ALLOW_MISSING_DEPENDENCIES=true
+          # Yahan wo script chalegi jo pichli 40 bar fail hui thi
+          # Is baar repack method use hoga
           bash repackimg.sh --boot boot.img --tree ./tree --output OrangeFox-KI8.img || echo "Script not found, attempting manual repack"
 
       - name: Upload Result
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4 # Version updated from v3 to v4
         with:
           name: OrangeFox-Final-Build
           path: workspace/*.img
