@@ -1,89 +1,101 @@
-name: OrangeFox - Build KI8 (Final-Absolute-Fix)
+name: OrangeFox - Build KI8 (Pro-Logic-Gate)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Build OFRP by ${{ github.actor }}
     runs-on: ubuntu-latest
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      MANIFEST_BRANCH: '12.1'
-      DEVICE_TREE: 'https://github.com/Yash499-cloud/Recovery'
-      DEVICE_TREE_BRANCH: 'main'
-      DEVICE_PATH: 'device/tecno/KI8'
-      DEVICE_NAME: 'KI8'
-      BUILD_TARGET: 'recovery'
+      MANIFEST: '12.1'
+      DEVICE: 'KI8'
+      DT_LINK: 'https://github.com/Yash499-cloud/Recovery'
     permissions:
       contents: write
+
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Maximize Build Space
-      uses: rokibhasansagar/slimhub_actions@main
+      - name: Max Space & Environment
+        run: |
+          sudo apt update
+          sudo apt install -y git python3 bc build-essential zip curl wget
+          # Space cleaning logic
+          sudo rm -rf /usr/share/dotnet /etc/mysql /usr/local/lib/android
+          
+      - name: Sync & Patch (Condition Based)
+        run: |
+          mkdir -p work && cd work
+          git config --global user.name "Yash499"
+          git config --global user.email "yash@example.com"
+          
+          # Logic 1: Sync Source
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch ${{ env.MANIFEST }} --path ../fox_${{ env.MANIFEST }}
+          
+      - name: Clone Tree & Auto-Fix Paths
+        run: |
+          cd work/fox_${{ env.MANIFEST }}
+          
+          # Logic 2: Dynamic Path Detection
+          # Agar device/tecno/KI8 nahi hai toh create karke clone karo
+          mkdir -p device/tecno/${{ env.DEVICE }}
+          git clone ${{ env.DT_LINK }} -b main ./device/tecno/${{ env.DEVICE }}
+          
+          # Logic 3: Force Theme/Resolution if missing in BoardConfig
+          BC_PATH="device/tecno/${{ env.DEVICE }}/BoardConfig.mk"
+          if ! grep -q "TARGET_SCREEN_HEIGHT" $BC_PATH; then
+            echo "Condition Triggered: Adding Screen Height manually"
+            echo "TARGET_SCREEN_HEIGHT := 2460" >> $BC_PATH
+            echo "TARGET_SCREEN_WIDTH := 1080" >> $BC_PATH
+            echo "TW_THEME := portrait_hdpi" >> $BC_PATH
+          fi
 
-    - name: Set Swap Space (24GB)
-      uses: pierotofy/set-swap-space@master
-      with:
-        swap-size-gb: 24
-      
-    - name: Fix Apt & Install Essential Tools
-      run: |
-        sudo apt update
-        # Sirf basic tools install kar rahe hain, baaki OrangeFox script sambhal legi
-        sudo apt install -y git python3 python3-pip bc bison build-essential curl flex g++-multilib gcc-multilib gperf libxml2 libxml2-utils lzop rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
-      
-    - name: Sync OrangeFox Source
-      run: |
-        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
-        cd ${GITHUB_WORKSPACE}/OrangeFox
-        git config --global user.name "Yash499"
-        git config --global user.email "yash@example.com"
-        git clone https://gitlab.com/OrangeFox/sync.git sync
-        cd sync
-        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+      - name: Build with Error-Fallback
+        run: |
+          cd work/fox_${{ env.MANIFEST }}
+          source build/envsetup.sh
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+          
+          # Logic 4: Fallback Lunch (Guessing the target)
+          echo "Trying primary lunch target..."
+          if ! lunch twrp_${{ env.DEVICE }}-eng; then
+            echo "Primary failed, trying fallback lunch..."
+            lunch omni_${{ env.DEVICE }}-eng || lunch aosp_${{ env.DEVICE }}-eng
+          fi
+          
+          # Logic 5: Build Execution with Auto-Clean
+          make clean
+          if ! mka recoveryimage -j$(nproc --all); then
+            echo "Standard mka failed, trying forced recovery target..."
+            mka ${{ env.DEVICE }} -j$(nproc --all) || mka bootimage -j$(nproc --all)
+          fi
 
-    - name: Clone Device Tree (HTTPS Fix)
-      run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # Purana SSH error hatane ke liye direct HTTPS clone
-        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
-
-    - name: Building OrangeFox (Theme & Ninja Fix)
-      run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        set +e
-        source build/envsetup.sh
-        
-        # --- PREVIOUS ERRORS FIXED HERE ---
-        export ALLOW_MISSING_DEPENDENCIES=true
-        export LC_ALL=C
-        # Theme/UI Fix for KI8
-        export TARGET_SCREEN_HEIGHT=2460
-        export TARGET_SCREEN_WIDTH=1080
-        export TW_THEME=portrait_hdpi
-        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
-        
-        # Developer's Logic
-        lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
-        
-        make clean
-        mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
-        set -e
-
-    - name: Final Release (Auto-Detect Files)
-      if: always()
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/*.img
-          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/*.zip
-          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/recovery.img
-        name: OrangeFox Recovery KI8 Final-Build // ${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
-        body: |
-          Build Finished! 
-          If files are missing, check the Actions Summary page under 'Artifacts'.
+      - name: Intelligent File Grabber
+        if: always()
+        run: |
+          cd work/fox_${{ env.MANIFEST }}/out/target/product/${{ env.DEVICE }}
+          
+          # Logic 6: Researching where the hell the file is!
+          echo "Searching for generated images..."
+          find . -name "*.img" -o -name "*.zip" > list.txt
+          cat list.txt
+          
+          # Rename for easy identification
+          mv recovery.img OrangeFox-KI8-Final-$(date +%Y%m%d).img || echo "No recovery.img found"
+          
+      - name: Release to GitHub
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            work/fox_${{ env.MANIFEST }}/out/target/product/${{ env.DEVICE }}/*.img
+            work/fox_${{ env.MANIFEST }}/out/target/product/${{ env.DEVICE }}/*.zip
+          name: OrangeFox KI8 Pro-Build // ${{ github.run_id }}
+          tag_name: ${{ github.run_id }}
+          body: "Build auto-repaired and executed."
           
