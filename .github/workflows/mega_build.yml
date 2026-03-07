@@ -22,7 +22,7 @@ on:
 jobs:
   build:
     name: Build OFRP for Tecno KI8
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # explicitly ubuntu-24.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
@@ -31,6 +31,7 @@ jobs:
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
       PRODUCT_NAME: 'omni_TECNO_KI8'
+      DEBIAN_FRONTEND: noninteractive
     permissions:
       contents: write
 
@@ -45,7 +46,7 @@ jobs:
           df -h
 
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Clean-up
         uses: rokibhasansagar/slimhub_actions@main
@@ -55,18 +56,67 @@ jobs:
         with:
           swap-size-gb: 24
 
-      - name: Install Build Environment
+      - name: Install Build Environment (Fixed for Ubuntu 24.04)
         run: |
+          set -e  # exit on error
+          echo "⚙️ Updating package lists..."
           sudo apt update
-          sudo apt -y upgrade
-          sudo apt -y install git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig python3 python3-pip openjdk-11-jdk
-          git config --global user.name "Samuel Kendall"
-          git config --global user.email "kinguser981@gmail.com"
+          
+          echo "⚙️ Installing build dependencies for Ubuntu 24.04..."
+          # Use correct package names for noble (24.04)
+          sudo apt install -y \
+            git-core \
+            gnupg \
+            flex \
+            bison \
+            build-essential \
+            zip \
+            curl \
+            zlib1g-dev \
+            gcc-multilib \
+            g++-multilib \
+            libc6-dev-i386 \
+            libncurses-dev \
+            lib32ncurses-dev \
+            x11proto-core-dev \
+            libx11-dev \
+            lib32z1-dev \
+            libgl1-mesa-dev \
+            libxml2-utils \
+            xsltproc \
+            unzip \
+            fontconfig \
+            python3 \
+            python3-pip \
+            openjdk-11-jdk \
+            patchelf \
+            bc \
+            cpio \
+            dosfstools \
+            e2fsprogs \
+            f2fs-tools \
+            gperf \
+            libelf-dev \
+            liblz4-tool \
+            libsdl1.2-dev \
+            libssl-dev \
+            lzop \
+            mkbootimg \
+            pngcrush \
+            schedtool \
+            squashfs-tools \
+            xsltproc \
+            zlib1g-dev \
+            libwxgtk3.2-dev  # wxGTK3.2 for ubuntu 24.04
+
+          echo "✅ Build dependencies installed successfully."
 
       - name: Clone OrangeFox Sync Script
         run: |
           mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
           cd ${GITHUB_WORKSPACE}/OrangeFox
+          git config --global user.name "Samuel Kendall"
+          git config --global user.email "kinguser981@gmail.com"
           git clone https://gitlab.com/OrangeFox/sync.git
           cd sync
           ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
@@ -77,38 +127,23 @@ jobs:
           rm -rf ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out
           echo "✅ Clean build enabled - out directory removed"
 
-      - name: Clone Device Tree and Auto-Fix Everything
+      - name: Clone Device Tree and Auto-Fix
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-          
-          # Purani device tree delete karo
           rm -rf ./${{ env.DEVICE_PATH }}
-          
-          # Clone karo device tree
           git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
-          
           cd ./${{ env.DEVICE_PATH }}
-          
           echo "🔧 Auto-repairing device tree..."
-          
-          # 1. vendorsetup.sh delete karo (obsolete)
           rm -f vendorsetup.sh
-          
-          # 2. AndroidProducts.mk create/fix karo
           if [ ! -f AndroidProducts.mk ]; then
             echo "PRODUCT_MAKEFILES := \$(LOCAL_DIR)/${{ env.PRODUCT_NAME }}.mk" > AndroidProducts.mk
           fi
-          
-          # Add COMMON_LUNCH_CHOICES if missing
           if ! grep -q "COMMON_LUNCH_CHOICES" AndroidProducts.mk; then
             echo "" >> AndroidProducts.mk
             echo "# Lunch choices" >> AndroidProducts.mk
             echo "COMMON_LUNCH_CHOICES := ${{ env.PRODUCT_NAME }}-userdebug ${{ env.PRODUCT_NAME }}-eng" >> AndroidProducts.mk
           fi
-          
-          # 3. device.mk check/fix
           if [ ! -f device.mk ]; then
-            echo "Creating device.mk"
             echo "# Device makefile for Tecno KI8" > device.mk
             echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)" >> device.mk
             echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)" >> device.mk
@@ -123,10 +158,7 @@ jobs:
             echo "PRODUCT_MODEL := ${{ env.DEVICE_NAME }}" >> device.mk
             echo "PRODUCT_MANUFACTURER := Tecno" >> device.mk
           fi
-          
-          # 4. BoardConfig.mk check
           if [ ! -f BoardConfig.mk ]; then
-            echo "❌ ERROR: BoardConfig.mk missing! Creating basic one..."
             echo "# BoardConfig.mk for Tecno KI8" > BoardConfig.mk
             echo "TARGET_NO_BOOTLOADER := true" >> BoardConfig.mk
             echo "TARGET_NO_RADIOIMAGE := true" >> BoardConfig.mk
@@ -191,10 +223,7 @@ jobs:
             echo "TW_USE_TOOLBOX := true" >> BoardConfig.mk
             echo "TW_NO_SCREEN_TIMEOUT := true" >> BoardConfig.mk
           fi
-          
-          # 5. recovery.fstab check
           if [ ! -f recovery.fstab ]; then
-            echo "❌ ERROR: recovery.fstab missing! Creating basic one..."
             echo "# Android fstab file for Tecno KI8" > recovery.fstab
             echo "#<src>                    <mnt_point>         <type>    <mnt_flags>               <fs_mgr_flags>" >> recovery.fstab
             echo "/dev/block/by-name/system  /system              ext4      ro,barrier=1             wait,slotselect,avb" >> recovery.fstab
@@ -207,88 +236,64 @@ jobs:
             echo "/dev/block/by-name/recovery /recovery            emmc      defaults                 defaults" >> recovery.fstab
             echo "/dev/block/by-name/misc    /misc                emmc      defaults                 defaults" >> recovery.fstab
           fi
-          
-          # 6. Prebuilt folder aur kernel check
           if [ ! -d prebuilt ]; then
             mkdir -p prebuilt
             echo "⚠️ prebuilt folder created. Please add kernel and dtb files."
           fi
-          
-          # 7. recovery/root folder check
           if [ ! -d recovery/root ]; then
             mkdir -p recovery/root
             touch recovery/root/.placeholder
           fi
-          
           echo "✅ Device tree ready!"
           echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: Build OrangeFox Recovery
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-          
-          echo "🚀 Setting up build environment..."
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
           export LC_ALL=C
-          
           echo "📱 Available targets:"
           print_lunch_menu
-          
           echo "🔨 Running lunch command..."
-          lunch ${{ env.PRODUCT_NAME }}-eng
-          
-          if [ $? -ne 0 ]; then
-            echo "❌ Lunch failed! Trying alternative method..."
-            export TARGET_PRODUCT=${{ env.PRODUCT_NAME }}
-            export TARGET_BUILD_VARIANT=eng
-            lunch
+          lunch ${{ env.PRODUCT_NAME }}-eng 2>&1 | tee lunch.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "❌ Lunch failed! Check lunch.log:"
+            cat lunch.log
+            exit 1
           fi
-          
-          echo "⚙️ Starting build with maximum threads..."
-          
+          echo "⚙️ Starting build..."
           if [[ "${{ github.event.inputs.build_type }}" == "boot" ]]; then
-            echo "Building boot image..."
-            mka bootimage -j$(nproc --all)
+            mka bootimage -j$(nproc --all) 2>&1 | tee build.log
           else
-            echo "Building recovery image..."
-            mka recoveryimage -j$(nproc --all)
+            mka recoveryimage -j$(nproc --all) 2>&1 | tee build.log
           fi
-          
-          if [ $? -ne 0 ]; then
-            echo "⚠️ First build attempt failed, trying with adbd flag..."
-            mka adbd recoveryimage -j$(nproc --all)
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "❌ Build failed! Last 50 lines of build.log:"
+            tail -50 build.log
+            exit 1
           fi
 
       - name: Find and Prepare Output Files
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/
-          
-          if [ -d "KI8" ]; then
-            cd KI8
-          elif [ -d "TECNO_KI8" ]; then
-            cd TECNO_KI8
-          elif [ -d "${{ env.DEVICE_NAME }}" ]; then
-            cd ${{ env.DEVICE_NAME }}
+          if [ -d "KI8" ]; then cd KI8
+          elif [ -d "TECNO_KI8" ]; then cd TECNO_KI8
+          elif [ -d "${{ env.DEVICE_NAME }}" ]; then cd ${{ env.DEVICE_NAME }}
           else
-            echo "❌ Could not find output directory!"
+            echo "❌ No output directory found!"
             ls -la
             exit 1
           fi
-          
-          if [ -f "recovery.img" ]; then
-            cp recovery.img OrangeFox-recovery.img
-          elif [ -f "OrangeFox*.img" ]; then
-            cp OrangeFox*.img OrangeFox-recovery.img
-          elif [ -f "boot.img" ]; then
-            cp boot.img OrangeFox-boot.img
+          if [ -f "recovery.img" ]; then cp recovery.img OrangeFox-recovery.img
+          elif [ -f "OrangeFox*.img" ]; then cp OrangeFox*.img OrangeFox-recovery.img
+          elif [ -f "boot.img" ]; then cp boot.img OrangeFox-boot.img
           else
             echo "❌ No image found!"
             ls -la *.img 2>/dev/null || echo "No .img files"
             exit 1
           fi
-          
           echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
           echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
 
