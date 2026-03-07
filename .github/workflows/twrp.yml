@@ -1,7 +1,7 @@
 name: OrangeFox - Build KI8 (Auto-Optimized)
 
 on:
-  workflow_dispatch: # Ab koi box nahi khulega, bas button dabao
+  workflow_dispatch:
 
 jobs:
   build:
@@ -10,29 +10,27 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Yahan maine saari details fix kardi hain jo tum manually bharte thay
       MANIFEST_BRANCH: '12.1'
       DEVICE_TREE: 'https://github.com/Yash499-cloud/Recovery'
       DEVICE_TREE_BRANCH: 'main'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
       BUILD_TARGET: 'recovery'
-      LDCHECK: 'vendor/bin/hw/android.hardware.boot@1.0-service'
     permissions:
       contents: write
     steps:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Clean-up & Space
+    - name: Clean-up & Space Management
       uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Swap Space
+    - name: Set Swap Space (24GB)
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 24
       
-    - name: Build Environment
+    - name: Build Environment Setup
       run: |
         sudo apt update
         sudo apt -y upgrade
@@ -40,7 +38,7 @@ jobs:
         cd scripts
         sudo bash setup/android_build_env.sh
       
-    - name: Set-up Manifest
+    - name: Sync OrangeFox Manifest
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
         cd ${GITHUB_WORKSPACE}/OrangeFox
@@ -50,34 +48,49 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-    - name: Clone Device Tree (Auto Path)
+    - name: Clone Device Tree
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # Yahan SSH ki jagah HTTPS use ho raha hai bina error ke
         git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
         cd ${{ env.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-    - name: Building OrangeFox (Ninja Fix)
+    - name: Building OrangeFox (Fixing Theme & Ninja)
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
         set +e
         source build/envsetup.sh
+        
+        # --- THEME & RESOLUTION FIX (Pichla error yahan tha) ---
+        export TARGET_SCREEN_HEIGHT=2460
+        export TARGET_SCREEN_WIDTH=1080
+        export TW_THEME=portrait_hdpi
+        export DEVICE_PATH=${{ env.DEVICE_PATH }}
+        
+        # --- EXTRA BUILD FLAGS ---
         export ALLOW_MISSING_DEPENDENCIES=true
-        # Developer ka original error handling logic:
+        export LC_ALL=C
+        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
+        
+        # Developer's Logic with Auto-Fallback
         lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
+        
         make clean
-        mka ${{ env.BUILD_TARGET }}image
+        mka ${{ env.BUILD_TARGET }}image -j$(nproc --all)
         set -e
 
-    - name: Upload to Release (V4)
+    - name: Upload to Release
       if: always()
       uses: softprops/action-gh-release@v2
       with:
         files: |
           ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.img
           ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip
-        name: Unofficial OrangeFox for ${{ env.DEVICE_NAME }}
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/recovery.img
+        name: OrangeFox Recovery for Tecno KI8 // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        body: "Build auto-generated for Tecno KI8"
-        
+        body: |
+          Build Succeeded!
+          Device: Tecno KI8 (Camon 19 Neo)
+          Branch: ${{ env.MANIFEST_BRANCH }}
+          
