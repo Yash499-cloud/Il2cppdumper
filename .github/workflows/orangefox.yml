@@ -7,14 +7,17 @@ jobs:
   build:
     name: Build OFRP for Tecno KI8
     runs-on: ubuntu-latest
+    if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
-      DEVICE_TREE: 'https://github.com/Yash499-cloud/il2cppdumper'
+      DEVICE_TREE: 'https://github.com/Yash499-cloud/Il2cppdumper'
       DEVICE_TREE_BRANCH: 'main'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
       PRODUCT_NAME: 'omni_TECNO_KI8'
+    permissions:
+      contents: write
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -48,33 +51,52 @@ jobs:
     - name: Clone Device Tree
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Yash499-cloud/il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Yash499-cloud/Il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
     - name: Building OrangeFox
       run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_12.1
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        set +e
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
-        lunch ${{ env.PRODUCT_NAME }}-eng
+        set -e
+        # Lunch target with fallback to manual export
+        lunch ${{ env.PRODUCT_NAME }}-eng || (export TARGET_PRODUCT=${{ env.PRODUCT_NAME }} && export TARGET_BUILD_VARIANT=eng)
         make clean
         mka adbd recoveryimage
 
-    - name: Check and Release
+    - name: Check and Prepare Files
       run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_12.1/out/target/product/KI8 || cd ${GITHUB_WORKSPACE}/OrangeFox/fox_12.1/out/target/product/TECNO_KI8
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/
+        # Check both possible output folder names
+        if [ -d "TECNO_KI8" ]; then cd TECNO_KI8; else cd KI8; fi
+        
         if [ -f OrangeFox*.img ]; then
-            mv OrangeFox*.img recovery.img
-            echo "IMG_FOUND=true" >> $GITHUB_ENV
-            echo "FINAL_PATH=$(pwd)" >> $GITHUB_ENV
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            cp OrangeFox*.img recovery.img
+            echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
+            
+            # Add Recovery Installer
+            wget https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
+            zip -ur recovery-installer.zip recovery.img
+        else
+            echo "Build failed: Image not found."
+            exit 1
         fi
 
     - name: Upload to Release
-      if: env.IMG_FOUND == 'true'
+      if: env.CHECK_IMG_IS_OK == 'true'
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          ${{ env.FINAL_PATH }}/recovery.img
-          ${{ env.FINAL_PATH }}/OrangeFox*.zip
+          ${{ env.FILE_PATH }}/recovery.img
+          ${{ env.FILE_PATH }}/recovery-installer.zip
+          ${{ env.FILE_PATH }}/OrangeFox*.zip
         name: Unofficial OrangeFox for KI8 // ${{ env.COMMIT_ID }}
         tag_name: ${{ github.run_id }}
+        body: |
+          Device: Tecno KI8 (MT6833)
+          Target: ${{ env.PRODUCT_NAME }}
+          Commit: ${{ env.COMMIT_ID }}
+          Branch: OrangeFox 12.1
