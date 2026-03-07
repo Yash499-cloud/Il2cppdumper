@@ -12,10 +12,11 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
       DEVICE_TREE: 'https://github.com/${{ github.repository_owner }}/il2cppdumper'
-      DEVICE_TREE_BRANCH: 'main' # Screenshot ke mutabiq branch 'main' hai
+      DEVICE_TREE_BRANCH: 'main'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
-      BUILD_TARGET: 'recovery'
+      # Ab aapne underscore use kiya hai, toh target ye hoga:
+      PRODUCT_NAME: 'omni_TECNO_KI8'
     permissions:
       contents: write
     steps:
@@ -48,10 +49,9 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-    - name: Clone Device Tree (Fixed Branch & Auth)
+    - name: Clone Device Tree
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        # il2cppdumper repo clone
         git clone https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository_owner }}/il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
         cd ${{ env.DEVICE_PATH }}
         echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
@@ -63,30 +63,37 @@ jobs:
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         set -e
-        # Screenshot ke exact file name 'omni_TECNO-KI8.mk' ke mutabiq
-        lunch omni_TECNO-KI8-eng
+        # Naya target underscore ke sath
+        lunch ${{ env.PRODUCT_NAME }}-eng
         make clean
-        mka adbd ${{ env.BUILD_TARGET }}image
+        mka adbd recoveryimage
 
     - name: Set Build Date
       run: |
         echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
 
-    - name: Check and Rename Recovery
+    - name: Check and Prepare Files
       run: |
-        # Folder name 'KI8' ya 'TECNO-KI8' dono check karega
-        if [ -d ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/TECNO-KI8 ]; then
-          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/TECNO-KI8
+        # Folder name ab underscore wala check karega
+        if [ -d ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/TECNO_KI8 ]; then
+          OUT_PATH="${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/TECNO_KI8"
+        elif [ -d ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/KI8 ]; then
+          OUT_PATH="${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/KI8"
         else
-          cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/KI8
+          OUT_PATH="${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/tecno_ki8"
         fi
         
+        cd $OUT_PATH
         if [ -f OrangeFox*.img ]; then
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            mv OrangeFox*.img recovery.img
-            echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
+            cp OrangeFox*.img recovery.img
+            echo "FILE_PATH=$OUT_PATH" >> $GITHUB_ENV
+            
+            # Recovery Installer logic
+            wget https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
+            zip -ur recovery-installer.zip recovery.img
         else
-            echo "Build complete but OrangeFox image not found."
+            echo "Build failed: Image not found in $OUT_PATH"
             exit 1
         fi
 
@@ -96,11 +103,12 @@ jobs:
       with:
         files: |
           ${{ env.FILE_PATH }}/recovery.img
+          ${{ env.FILE_PATH }}/recovery-installer.zip
           ${{ env.FILE_PATH }}/OrangeFox*.zip
         name: Unofficial OrangeFox for Tecno KI8 // ${{ env.BUILD_DATE }}
         tag_name: ${{ github.run_id }}
         body: |
-          Device: Tecno KI8 (MT6833)
-          Target: omni_TECNO-KI8-eng
+          Build successful with Underscore (_) fix.
+          Target: ${{ env.PRODUCT_NAME }}
           Commit: ${{ env.COMMIT_ID }}
           
