@@ -2,24 +2,34 @@ name: OrangeFox - Build (Automated for Tecno KI8)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 jobs:
   build:
     name: Build OFRP for Tecno KI8
     runs-on: ubuntu-latest
-    if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
-      DEVICE_TREE: 'https://github.com/${{ github.repository_owner }}/il2cppdumper'
+      DEVICE_TREE: 'https://github.com/Yash499-cloud/Il2cppdumper'
       DEVICE_TREE_BRANCH: 'main'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
-      # Ab aapne underscore use kiya hai, toh target ye hoga:
       PRODUCT_NAME: 'omni_TECNO_KI8'
     permissions:
       contents: write
+
     steps:
+    - name: Maximize Build Space
+      run: |
+        sudo swapoff -a
+        sudo rm -f /swapfile
+        sudo docker image prune -a -f
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/lib/jvm
+        sudo apt clean
+        df -h
+
     - name: Checkout
       uses: actions/checkout@v3
 
@@ -30,71 +40,295 @@ jobs:
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 24
-      
-    - name: Build Environment
+
+    - name: Install Build Environment
       run: |
         sudo apt update
         sudo apt -y upgrade
-        git clone https://gitlab.com/OrangeFox/misc/scripts
-        cd scripts
-        sudo bash setup/android_build_env.sh
-      
-    - name: Set-up Manifest
+        sudo apt -y install git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+          gcc-multilib g++-multilib libc6-dev-i386 libncurses5 lib32ncurses5-dev x11proto-core-dev \
+          libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig \
+          python3 python3-pip openjdk-11-jdk
+        git config --global user.name "Samuel Kendall"
+        git config --global user.email "kinguser981@gmail.com"
+
+    - name: Clone OrangeFox Sync Script
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
         cd ${GITHUB_WORKSPACE}/OrangeFox
-        git config --global user.name "Samuel Kendall"
-        git config --global user.email "kinguser981@gmail.com"
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-    - name: Clone Device Tree
+    - name: Clone Device Tree and Auto-Fix Everything
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        git clone https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository_owner }}/il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
-        cd ${{ env.DEVICE_PATH }}
-        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
-
-    - name: Building OrangeFox
-      run: |
-        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        set +e
-        source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
-        set -e
-        # Naya target underscore ke sath
-        lunch ${{ env.PRODUCT_NAME }}-eng
-        make clean
-        mka adbd recoveryimage
-
-    - name: Set Build Date
-      run: |
-        echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
-
-    - name: Check and Prepare Files
-      run: |
-        # Folder name ab underscore wala check karega
-        if [ -d ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/TECNO_KI8 ]; then
-          OUT_PATH="${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/TECNO_KI8"
-        elif [ -d ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/KI8 ]; then
-          OUT_PATH="${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/KI8"
-        else
-          OUT_PATH="${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/tecno_ki8"
+        
+        # Purani device tree delete karo
+        rm -rf ./${{ env.DEVICE_PATH }}
+        
+        # Clone karo device tree
+        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        
+        cd ./${{ env.DEVICE_PATH }}
+        
+        echo "🔧 Auto-repairing device tree..."
+        
+        # 1. vendorsetup.sh delete karo (obsolete)
+        rm -f vendorsetup.sh
+        
+        # 2. AndroidProducts.mk create/fix karo
+        if [ ! -f AndroidProducts.mk ]; then
+          echo "PRODUCT_MAKEFILES := \$(LOCAL_DIR)/${{ env.PRODUCT_NAME }}.mk" > AndroidProducts.mk
         fi
         
-        cd $OUT_PATH
-        if [ -f OrangeFox*.img ]; then
-            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
-            cp OrangeFox*.img recovery.img
-            echo "FILE_PATH=$OUT_PATH" >> $GITHUB_ENV
-            
-            # Recovery Installer logic
-            wget https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
-            zip -ur recovery-installer.zip recovery.img
+        # Add COMMON_LUNCH_CHOICES if missing
+        if ! grep -q "COMMON_LUNCH_CHOICES" AndroidProducts.mk; then
+          echo "" >> AndroidProducts.mk
+          echo "# Lunch choices" >> AndroidProducts.mk
+          echo "COMMON_LUNCH_CHOICES := ${{ env.PRODUCT_NAME }}-userdebug ${{ env.PRODUCT_NAME }}-eng" >> AndroidProducts.mk
+        fi
+        
+        # 3. device.mk check/fix
+        if [ ! -f device.mk ]; then
+          echo "Creating device.mk"
+          echo "# Device makefile" > device.mk
+          echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)" >> device.mk
+          echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)" >> device.mk
+          echo "PRODUCT_NAME := ${{ env.PRODUCT_NAME }}" >> device.mk
+          echo "PRODUCT_DEVICE := ${{ env.DEVICE_NAME }}" >> device.mk
+          echo "PRODUCT_BRAND := Tecno" >> device.mk
+          echo "PRODUCT_MODEL := KI8" >> device.mk
+          echo "PRODUCT_MANUFACTURER := Tecno" >> device.mk
+        fi
+        
+        # 4. BoardConfig.mk check
+        if [ ! -f BoardConfig.mk ]; then
+          echo "❌ ERROR: BoardConfig.mk missing! Creating basic one..."
+          cat > BoardConfig.mk << 'EOF'
+# BoardConfig.mk for Tecno KI8
+TARGET_NO_BOOTLOADER := true
+TARGET_NO_RADIOIMAGE := true
+TARGET_ARCH := arm64
+TARGET_ARCH_VARIANT := armv8-a
+TARGET_CPU_ABI := arm64-v8a
+TARGET_CPU_ABI2 :=
+TARGET_CPU_VARIANT := cortex-a53
+TARGET_2ND_ARCH := arm
+TARGET_2ND_ARCH_VARIANT := armv7-a-neon
+TARGET_2ND_CPU_ABI := armeabi-v7a
+TARGET_2ND_CPU_ABI2 := armeabi
+TARGET_2ND_CPU_VARIANT := cortex-a53
+TARGET_USES_64_BIT_BINDER := true
+TARGET_SUPPORTS_64_BIT_APPS := true
+TARGET_SUPPORTS_32_BIT_APPS := true
+
+# Kernel
+BOARD_KERNEL_CMDLINE := bootopt=64S3,32N2,64N2
+BOARD_KERNEL_BASE := 0x40078000
+BOARD_KERNEL_OFFSET := 0x00008000
+BOARD_KERNEL_PAGESIZE := 2048
+BOARD_KERNEL_TAGS_OFFSET := 0x0bc08000
+BOARD_RAMDISK_OFFSET := 0x07c08000
+BOARD_DTB_OFFSET := 0x0bc08000
+BOARD_BOOT_HEADER_VERSION := 2
+BOARD_KERNEL_IMAGE_NAME := Image
+BOARD_KERNEL_SEPARATED_DTBO := true
+
+# Partitions
+BOARD_FLASH_BLOCK_SIZE := 131072
+BOARD_BOOTIMAGE_PARTITION_SIZE := 33554432
+BOARD_RECOVERYIMAGE_PARTITION_SIZE := 33554432
+BOARD_SUPER_PARTITION_SIZE := 9126805504
+BOARD_SUPER_PARTITION_GROUPS := main
+BOARD_MAIN_SIZE := 9126805504
+BOARD_MAIN_PARTITION_LIST := system vendor product
+
+# Recovery
+BOARD_USES_RECOVERY_AS_BOOT := true
+BOARD_SUPPRESS_SECURE_ERASE := true
+TARGET_NO_RECOVERY := false
+TARGET_RECOVERY_FSTAB := device/tecno/KI8/recovery.fstab
+TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
+TARGET_USERIMAGES_USE_EXT4 := true
+TARGET_USERIMAGES_USE_F2FS := true
+BOARD_PREBUILT_DTBOIMAGE := device/tecno/KI8/prebuilt/dtbo.img
+BOARD_PREBUILT_DTBIMAGE_DIR := device/tecno/KI8/prebuilt/dtb
+
+# OFRP Specific
+OF_TARGET_DEVICE_ALT := KI8,TECNO-KI8
+OF_MAINTAINER := Samuel Kendall
+OF_STATUS := Unofficial
+TW_THEME := portrait_hdpi
+TW_BRIGHTNESS_PATH := /sys/class/leds/lcd-backlight/brightness
+TW_DEFAULT_BRIGHTNESS := 1200
+TW_EXCLUDE_DEFAULT_USB_INIT := true
+TW_EXTRA_LANGUAGES := true
+TW_INCLUDE_CRYPTO := true
+TW_INCLUDE_FBE := true
+TW_INCLUDE_FBE_METADATA_DECRYPT := true
+TW_INCLUDE_NTFS_3G := true
+TW_INCLUDE_RESETPROP := true
+TW_USE_TOOLBOX := true
+TW_NO_SCREEN_TIMEOUT := true
+TW_NO_REBOOT_BOOTLOADER := false
+TW_NO_REBOOT_RECOVERY := false
+TW_NO_USB_STORAGE := false
+TW_INPUT_BLACKLIST := "hbtp_vm"
+EOF
+          echo "⚠️ Basic BoardConfig.mk created. Please review it."
+        fi
+        
+        # 5. recovery.fstab check
+        if [ ! -f recovery.fstab ]; then
+          echo "❌ ERROR: recovery.fstab missing! Creating basic one..."
+          cat > recovery.fstab << 'EOF'
+# Android fstab file.
+#<src>                                                  <mnt_point>         <type>    <mnt_flags and options>                               <fs_mgr_flags>
+# Super partitions
+/dev/block/by-name/system                               /system              ext4      ro,barrier=1                                             wait,slotselect,avb
+/dev/block/by-name/system_ext                            /system_ext          ext4      ro,barrier=1                                             wait,slotselect,avb
+/dev/block/by-name/product                               /product             ext4      ro,barrier=1                                             wait,slotselect,avb
+/dev/block/by-name/vendor                                /vendor              ext4      ro,barrier=1                                             wait,slotselect,avb
+
+# Data partition
+/dev/block/by-name/userdata                              /data                f2fs      nosuid,nodev,noatime,discard,reserve_root=32768,resgid=1065,inlinecrypt,wbpolicy=v1,flush_merge,extent_cache,mode=adaptive,active_logs=6    wait,check,quota,formattable,reservedsize=128M,fileencryption=ice,keydirectory=/metadata/vold/metadata_encryption
+
+# Cache partition
+/dev/block/by-name/cache                                 /cache               ext4      nosuid,nodev,noatime,barrier=1                          wait,check,formattable
+
+# Metadata partition
+/dev/block/by-name/metadata                              /metadata            ext4      nosuid,nodev,noatime,barrier=1                          wait,formattable
+
+# Boot and misc
+/dev/block/by-name/boot                                  /boot                emmc      defaults                                               defaults
+/dev/block/by-name/recovery                              /recovery            emmc      defaults                                               defaults
+/dev/block/by-name/misc                                  /misc                emmc      defaults                                               defaults
+
+# External storage
+/dev/block/mmcblk1p1                                     /external_sd         vfat      nosuid,nodev,noatime,shortname=mixed,utf8,uid=1023,gid=1023    wait,noemulatedsd,voldmanaged=sdcard1:auto
+/dev/block/zram0                                         /dev/block/zram0     swap      defaults                                               defaults
+
+# USB OTG
+/dev/block/sda1                                          /usb_otg             vfat      nosuid,nodev,noatime,utf8                              wait,noemulatedsd,voldmanaged=usb:auto
+EOF
+        fi
+        
+        # 6. Prebuilt folder aur kernel check
+        if [ ! -d prebuilt ]; then
+          mkdir -p prebuilt
+        fi
+        
+        # 7. recovery/root folder check
+        if [ ! -d recovery/root ]; then
+          mkdir -p recovery/root
+          touch recovery/root/.placeholder
+        fi
+        
+        echo "✅ Device tree ready!"
+        echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+    - name: Build OrangeFox Recovery
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        
+        echo "🚀 Setting up build environment..."
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
+        export LC_ALL=C
+        
+        echo "📱 Available targets:"
+        print_lunch_menu
+        
+        echo "🔨 Running lunch command..."
+        lunch ${{ env.PRODUCT_NAME }}-eng
+        
+        if [ $? -ne 0 ]; then
+          echo "❌ Lunch failed! Trying alternative method..."
+          # Alternative: Direct lunch with full product name
+          export TARGET_PRODUCT=${{ env.PRODUCT_NAME }}
+          export TARGET_BUILD_VARIANT=eng
+          lunch
+        fi
+        
+        echo "⚙️ Starting build with maximum threads..."
+        mka recoveryimage -j$(nproc --all)
+        
+        if [ $? -ne 0 ]; then
+          echo "⚠️ First build attempt failed, trying with adbd flag..."
+          mka adbd recoveryimage -j$(nproc --all)
+        fi
+
+    - name: Find and Prepare Output Files
+      run: |
+        set -e
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/
+        
+        # Find output directory
+        OUTPUT_DIR=""
+        if [ -d "KI8" ]; then
+          OUTPUT_DIR="KI8"
+        elif [ -d "TECNO_KI8" ]; then
+          OUTPUT_DIR="TECNO_KI8"
+        elif [ -d "${{ env.DEVICE_NAME }}" ]; then
+          OUTPUT_DIR="${{ env.DEVICE_NAME }}"
         else
-            echo "Build failed: Image not found in $OUT_PATH"
-            exit 1
+          echo "📂 Available directories:"
+          ls -la
+          # Try to find any directory with recovery image
+          for dir in */; do
+            if [ -f "${dir}recovery.img" ] || [ -f "${dir}OrangeFox*.img" ]; then
+              OUTPUT_DIR=$(basename "$dir")
+              break
+            fi
+          done
+        fi
+        
+        if [ -z "$OUTPUT_DIR" ]; then
+          echo "❌ Could not find output directory!"
+          exit 1
+        fi
+        
+        cd "$OUTPUT_DIR"
+        echo "📁 Output directory: $(pwd)"
+        
+        # Find recovery image
+        IMAGE_FILE=""
+        if [ -f "recovery.img" ]; then
+          IMAGE_FILE="recovery.img"
+        elif [ -f "OrangeFox*.img" ]; then
+          IMAGE_FILE=$(ls OrangeFox*.img | head -n1)
+        elif [ -f "boot.img" ]; then
+          IMAGE_FILE="boot.img"
+        fi
+        
+        if [ -z "$IMAGE_FILE" ]; then
+          echo "❌ No recovery image found!"
+          ls -la *.img 2>/dev/null || echo "No .img files"
+          exit 1
+        fi
+        
+        echo "✅ Found image: $IMAGE_FILE"
+        cp "$IMAGE_FILE" recovery.img
+        echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
+        echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+        
+        # Create installer zip if available
+        if wget -q --spider https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip; then
+          wget https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
+          zip -ur recovery-installer.zip recovery.img
+        else
+          # Create simple installer
+          mkdir -p installer/META-INF/com/google/android
+          echo 'ui_print("Installing recovery...");' > installer/META-INF/com/google/android/update-binary
+          echo 'package_extract_file("recovery.img", "/dev/block/by-name/recovery");' >> installer/META-INF/com/google/android/update-binary
+          echo 'ui_print("Done!");' >> installer/META-INF/com/google/android/update-binary
+          echo '# Dummy script' > installer/META-INF/com/google/android/updater-script
+          cp recovery.img installer/
+          cd installer
+          zip -r ../recovery-installer.zip *
+          cd ..
         fi
 
     - name: Upload to Release
@@ -105,10 +339,6 @@ jobs:
           ${{ env.FILE_PATH }}/recovery.img
           ${{ env.FILE_PATH }}/recovery-installer.zip
           ${{ env.FILE_PATH }}/OrangeFox*.zip
-        name: Unofficial OrangeFox for Tecno KI8 // ${{ env.BUILD_DATE }}
+        name: Unofficial OrangeFox for KI8 // ${{ env.COMMIT_ID }}
         tag_name: ${{ github.run_id }}
-        body: |
-          Build successful with Underscore (_) fix.
-          Target: ${{ env.PRODUCT_NAME }}
-          Commit: ${{ env.COMMIT_ID }}
-          
+        generate_release_notes: true
