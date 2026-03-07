@@ -22,7 +22,7 @@ on:
 jobs:
   build:
     name: Build OFRP for Tecno KI8
-    runs-on: ubuntu-24.04  # explicitly ubuntu-24.04
+    runs-on: ubuntu-24.04
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
@@ -56,14 +56,13 @@ jobs:
         with:
           swap-size-gb: 24
 
-      - name: Install Build Environment (Fixed for Ubuntu 24.04)
+      - name: Install Build Environment
         run: |
-          set -e  # exit on error
+          set -e
           echo "⚙️ Updating package lists..."
           sudo apt update
           
           echo "⚙️ Installing build dependencies for Ubuntu 24.04..."
-          # Use correct package names for noble (24.04)
           sudo apt install -y \
             git-core \
             gnupg \
@@ -107,9 +106,21 @@ jobs:
             squashfs-tools \
             xsltproc \
             zlib1g-dev \
-            libwxgtk3.2-dev  # wxGTK3.2 for ubuntu 24.04
+            libwxgtk3.2-dev
 
           echo "✅ Build dependencies installed successfully."
+
+      - name: Install repo tool
+        run: |
+          if ! command -v repo &> /dev/null; then
+            echo "📦 Installing repo tool manually..."
+            mkdir -p ~/bin
+            curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+            chmod a+x ~/bin/repo
+            echo "$HOME/bin" >> $GITHUB_PATH
+          else
+            echo "✅ repo already installed."
+          fi
 
       - name: Clone OrangeFox Sync Script
         run: |
