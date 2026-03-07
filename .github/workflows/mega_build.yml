@@ -1,9 +1,25 @@
 name: OrangeFox - Build (Automated for Tecno KI8)
 
+# Manual trigger option - You can run this workflow manually from Actions tab
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # <-- Yeh manually trigger karne ka option hai
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'recovery'
+        type: choice
+        options:
+          - recovery
+          - boot
+      clean_build:
+        description: 'Clean build (rm -rf out)'
+        required: false
+        default: false
+        type: boolean
+
   push:
-    branches: [ main ]
+    branches: [ main ]      # <-- Ye automatically trigger hoga jab main branch pe push karo
 
 jobs:
   build:
@@ -60,6 +76,12 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
+    - name: Clean Build (if selected)
+      if: github.event.inputs.clean_build == 'true'
+      run: |
+        rm -rf ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out
+        echo "✅ Clean build enabled - out directory removed"
+
     - name: Clone Device Tree and Auto-Fix Everything
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
@@ -92,14 +114,26 @@ jobs:
         # 3. device.mk check/fix
         if [ ! -f device.mk ]; then
           echo "Creating device.mk"
-          echo "# Device makefile" > device.mk
-          echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/core_64_bit.mk)" >> device.mk
-          echo "\$(call inherit-product, \$(SRC_TARGET_DIR)/product/full_base_telephony.mk)" >> device.mk
-          echo "PRODUCT_NAME := ${{ env.PRODUCT_NAME }}" >> device.mk
-          echo "PRODUCT_DEVICE := ${{ env.DEVICE_NAME }}" >> device.mk
-          echo "PRODUCT_BRAND := Tecno" >> device.mk
-          echo "PRODUCT_MODEL := KI8" >> device.mk
-          echo "PRODUCT_MANUFACTURER := Tecno" >> device.mk
+          cat > device.mk << 'EOF'
+# Device makefile for Tecno KI8
+$(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
+$(call inherit-product, $(SRC_TARGET_DIR)/product/full_base_telephony.mk)
+
+# Inherit from common
+$(call inherit-product, device/tecno/KI8/BoardConfig.mk)
+
+# Product names
+PRODUCT_NAME := omni_TECNO_KI8
+PRODUCT_DEVICE := KI8
+PRODUCT_BRAND := Tecno
+PRODUCT_MODEL := KI8
+PRODUCT_MANUFACTURER := Tecno
+
+# Inherit from prebuilt if exists
+ifneq ($(wildcard vendor/tecno/KI8),)
+$(call inherit-product, vendor/tecno/KI8/device-vendor.mk)
+endif
+EOF
         fi
         
         # 4. BoardConfig.mk check
@@ -134,6 +168,8 @@ BOARD_DTB_OFFSET := 0x0bc08000
 BOARD_BOOT_HEADER_VERSION := 2
 BOARD_KERNEL_IMAGE_NAME := Image
 BOARD_KERNEL_SEPARATED_DTBO := true
+BOARD_PREBUILT_DTBOIMAGE := device/tecno/KI8/prebuilt/dtbo.img
+BOARD_PREBUILT_DTBIMAGE_DIR := device/tecno/KI8/prebuilt/dtb
 
 # Partitions
 BOARD_FLASH_BLOCK_SIZE := 131072
@@ -152,8 +188,6 @@ TARGET_RECOVERY_FSTAB := device/tecno/KI8/recovery.fstab
 TARGET_RECOVERY_PIXEL_FORMAT := RGBX_8888
 TARGET_USERIMAGES_USE_EXT4 := true
 TARGET_USERIMAGES_USE_F2FS := true
-BOARD_PREBUILT_DTBOIMAGE := device/tecno/KI8/prebuilt/dtbo.img
-BOARD_PREBUILT_DTBIMAGE_DIR := device/tecno/KI8/prebuilt/dtb
 
 # OFRP Specific
 OF_TARGET_DEVICE_ALT := KI8,TECNO-KI8
@@ -171,10 +205,6 @@ TW_INCLUDE_NTFS_3G := true
 TW_INCLUDE_RESETPROP := true
 TW_USE_TOOLBOX := true
 TW_NO_SCREEN_TIMEOUT := true
-TW_NO_REBOOT_BOOTLOADER := false
-TW_NO_REBOOT_RECOVERY := false
-TW_NO_USB_STORAGE := false
-TW_INPUT_BLACKLIST := "hbtp_vm"
 EOF
           echo "⚠️ Basic BoardConfig.mk created. Please review it."
         fi
@@ -183,40 +213,24 @@ EOF
         if [ ! -f recovery.fstab ]; then
           echo "❌ ERROR: recovery.fstab missing! Creating basic one..."
           cat > recovery.fstab << 'EOF'
-# Android fstab file.
-#<src>                                                  <mnt_point>         <type>    <mnt_flags and options>                               <fs_mgr_flags>
-# Super partitions
-/dev/block/by-name/system                               /system              ext4      ro,barrier=1                                             wait,slotselect,avb
-/dev/block/by-name/system_ext                            /system_ext          ext4      ro,barrier=1                                             wait,slotselect,avb
-/dev/block/by-name/product                               /product             ext4      ro,barrier=1                                             wait,slotselect,avb
-/dev/block/by-name/vendor                                /vendor              ext4      ro,barrier=1                                             wait,slotselect,avb
-
-# Data partition
-/dev/block/by-name/userdata                              /data                f2fs      nosuid,nodev,noatime,discard,reserve_root=32768,resgid=1065,inlinecrypt,wbpolicy=v1,flush_merge,extent_cache,mode=adaptive,active_logs=6    wait,check,quota,formattable,reservedsize=128M,fileencryption=ice,keydirectory=/metadata/vold/metadata_encryption
-
-# Cache partition
-/dev/block/by-name/cache                                 /cache               ext4      nosuid,nodev,noatime,barrier=1                          wait,check,formattable
-
-# Metadata partition
-/dev/block/by-name/metadata                              /metadata            ext4      nosuid,nodev,noatime,barrier=1                          wait,formattable
-
-# Boot and misc
-/dev/block/by-name/boot                                  /boot                emmc      defaults                                               defaults
-/dev/block/by-name/recovery                              /recovery            emmc      defaults                                               defaults
-/dev/block/by-name/misc                                  /misc                emmc      defaults                                               defaults
-
-# External storage
-/dev/block/mmcblk1p1                                     /external_sd         vfat      nosuid,nodev,noatime,shortname=mixed,utf8,uid=1023,gid=1023    wait,noemulatedsd,voldmanaged=sdcard1:auto
-/dev/block/zram0                                         /dev/block/zram0     swap      defaults                                               defaults
-
-# USB OTG
-/dev/block/sda1                                          /usb_otg             vfat      nosuid,nodev,noatime,utf8                              wait,noemulatedsd,voldmanaged=usb:auto
+# Android fstab file for Tecno KI8
+#<src>                    <mnt_point>         <type>    <mnt_flags>               <fs_mgr_flags>
+/dev/block/by-name/system  /system              ext4      ro,barrier=1             wait,slotselect,avb
+/dev/block/by-name/vendor  /vendor              ext4      ro,barrier=1             wait,slotselect,avb
+/dev/block/by-name/product /product             ext4      ro,barrier=1             wait,slotselect,avb
+/dev/block/by-name/userdata /data               f2fs      nosuid,nodev,noatime,discard    wait,check,quota,formattable,fileencryption=ice
+/dev/block/by-name/cache   /cache               ext4      nosuid,nodev,noatime     wait,check,formattable
+/dev/block/by-name/metadata /metadata           ext4      nosuid,nodev,noatime     wait,formattable
+/dev/block/by-name/boot    /boot                emmc      defaults                 defaults
+/dev/block/by-name/recovery /recovery            emmc      defaults                 defaults
+/dev/block/by-name/misc    /misc                emmc      defaults                 defaults
 EOF
         fi
         
         # 6. Prebuilt folder aur kernel check
         if [ ! -d prebuilt ]; then
           mkdir -p prebuilt
+          echo "⚠️ prebuilt folder created. Please add kernel and dtb files."
         fi
         
         # 7. recovery/root folder check
@@ -253,7 +267,15 @@ EOF
         fi
         
         echo "⚙️ Starting build with maximum threads..."
-        mka recoveryimage -j$(nproc --all)
+        
+        # Check build type from manual input
+        if [[ "${{ github.event.inputs.build_type }}" == "boot" ]]; then
+          echo "Building boot image..."
+          mka bootimage -j$(nproc --all)
+        else
+          echo "Building recovery image..."
+          mka recoveryimage -j$(nproc --all)
+        fi
         
         if [ $? -ne 0 ]; then
           echo "⚠️ First build attempt failed, trying with adbd flag..."
