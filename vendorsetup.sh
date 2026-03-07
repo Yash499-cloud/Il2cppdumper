@@ -1,1 +1,1 @@
-add_lunch_combo omni_TECNO_KI8-userdebug
+# Use AndroidProducts.mk instead

@@ -1,3 +1,3 @@
 PRODUCT_MAKEFILES := $(LOCAL_DIR)/omni_TECNO_KI8.mk
 
-COMMON_LUNCH_CHOICES :=     omni_TECNO_KI8-user     omni_TECNO_KI8-userdebug     omni_TECNO_KI8-eng
+COMMON_LUNCH_CHOICES :=     omni_TECNO_KI8-eng     omni_TECNO_KI8-userdebug
