@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Pro-Logic-Gate)
+name: OrangeFox - Build KI8 (Final-Logic-Gate)
 
 on:
   workflow_dispatch:
@@ -18,84 +18,83 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Max Space & Environment
+      - name: Environment Setup
         run: |
           sudo apt update
-          sudo apt install -y git python3 bc build-essential zip curl wget
-          # Space cleaning logic
+          sudo apt install -y git python3 bc build-essential zip curl wget rsync
           sudo rm -rf /usr/share/dotnet /etc/mysql /usr/local/lib/android
           
-      - name: Sync & Patch (Condition Based)
+      - name: Sync Source (With Verification)
         run: |
           mkdir -p work && cd work
           git config --global user.name "Yash499"
           git config --global user.email "yash@example.com"
-          
-          # Logic 1: Sync Source
           git clone https://gitlab.com/OrangeFox/sync.git
           cd sync
-          ./orangefox_sync.sh --branch ${{ env.MANIFEST }} --path ../fox_${{ env.MANIFEST }}
+          # Force sync logic
+          ./orangefox_sync.sh --branch ${{ env.MANIFEST }} --path ../fox_${{ env.MANIFEST }} || echo "Sync had issues, but checking folder..."
           
-      - name: Clone Tree & Auto-Fix Paths
+          cd ..
+          if [ ! -d "fox_${{ env.MANIFEST }}" ]; then
+            echo "ERROR: Folder fox_${{ env.MANIFEST }} not found! Searching for any sync folder..."
+            ls -R
+            # Agar folder nahi mila toh jo bhi directory bani hai use hi fox folder maan lo
+            FOUND_DIR=$(find . -maxdepth 1 -type d -name "fox*" | head -n 1)
+            if [ -n "$FOUND_DIR" ]; then mv "$FOUND_DIR" "fox_${{ env.MANIFEST }}"; else exit 1; fi
+          fi
+
+      - name: Clone Tree & Fix BoardConfig
         run: |
-          cd work/fox_${{ env.MANIFEST }}
+          # Dhoondho ki fox folder kahan hai
+          FOX_PATH=$(find . -name "build" -type d | grep "fox" | head -n 1 | sed 's/\/build//')
+          cd $FOX_PATH
           
-          # Logic 2: Dynamic Path Detection
-          # Agar device/tecno/KI8 nahi hai toh create karke clone karo
           mkdir -p device/tecno/${{ env.DEVICE }}
           git clone ${{ env.DT_LINK }} -b main ./device/tecno/${{ env.DEVICE }}
           
-          # Logic 3: Force Theme/Resolution if missing in BoardConfig
+          # Auto-Fix Screen Resolution
           BC_PATH="device/tecno/${{ env.DEVICE }}/BoardConfig.mk"
-          if ! grep -q "TARGET_SCREEN_HEIGHT" $BC_PATH; then
-            echo "Condition Triggered: Adding Screen Height manually"
+          if [ -f "$BC_PATH" ]; then
+            sed -i '/TARGET_SCREEN_HEIGHT/d' $BC_PATH
+            sed -i '/TARGET_SCREEN_WIDTH/d' $BC_PATH
             echo "TARGET_SCREEN_HEIGHT := 2460" >> $BC_PATH
             echo "TARGET_SCREEN_WIDTH := 1080" >> $BC_PATH
             echo "TW_THEME := portrait_hdpi" >> $BC_PATH
           fi
 
-      - name: Build with Error-Fallback
+      - name: Build Execution (Step-by-Step)
         run: |
-          cd work/fox_${{ env.MANIFEST }}
+          FOX_PATH=$(find . -name "build" -type d | grep "fox" | head -n 1 | sed 's/\/build//')
+          cd $FOX_PATH
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
           
-          # Logic 4: Fallback Lunch (Guessing the target)
-          echo "Trying primary lunch target..."
-          if ! lunch twrp_${{ env.DEVICE }}-eng; then
-            echo "Primary failed, trying fallback lunch..."
-            lunch omni_${{ env.DEVICE }}-eng || lunch aosp_${{ env.DEVICE }}-eng
-          fi
+          # Trying multiple lunch targets
+          lunch twrp_${{ env.DEVICE }}-eng || lunch omni_${{ env.DEVICE }}-eng || lunch aosp_${{ env.DEVICE }}-eng
           
-          # Logic 5: Build Execution with Auto-Clean
-          make clean
-          if ! mka recoveryimage -j$(nproc --all); then
-            echo "Standard mka failed, trying forced recovery target..."
-            mka ${{ env.DEVICE }} -j$(nproc --all) || mka bootimage -j$(nproc --all)
-          fi
+          mka recoveryimage -j$(nproc --all) || mka ${{ env.DEVICE }} -j$(nproc --all)
 
-      - name: Intelligent File Grabber
+      - name: Intelligent Artifact Grabber
         if: always()
         run: |
-          cd work/fox_${{ env.MANIFEST }}/out/target/product/${{ env.DEVICE }}
-          
-          # Logic 6: Researching where the hell the file is!
-          echo "Searching for generated images..."
-          find . -name "*.img" -o -name "*.zip" > list.txt
-          cat list.txt
-          
-          # Rename for easy identification
-          mv recovery.img OrangeFox-KI8-Final-$(date +%Y%m%d).img || echo "No recovery.img found"
+          # Kisi bhi folder mein .img file dhoondho
+          OUTPUT_DIR=$(find . -name "${{ env.DEVICE }}" -type d | grep "target/product" | head -n 1)
+          if [ -d "$OUTPUT_DIR" ]; then
+            cd $OUTPUT_DIR
+            mkdir -p ${{ github.workspace }}/upload
+            cp *.img ${{ github.workspace }}/upload/ 2>/dev/null || true
+            cp *.zip ${{ github.workspace }}/upload/ 2>/dev/null || true
+          else
+            echo "Build directory not found. Listing all files for debug:"
+            find . -name "*.img"
+          fi
           
       - name: Release to GitHub
         if: always()
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            work/fox_${{ env.MANIFEST }}/out/target/product/${{ env.DEVICE }}/*.img
-            work/fox_${{ env.MANIFEST }}/out/target/product/${{ env.DEVICE }}/*.zip
-          name: OrangeFox KI8 Pro-Build // ${{ github.run_id }}
+          files: upload/*
+          name: OrangeFox KI8 Final-Logic // ${{ github.run_id }}
           tag_name: ${{ github.run_id }}
-          body: "Build auto-repaired and executed."
+          body: "Auto-detected build files."
           
