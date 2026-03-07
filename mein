@@ -1,0 +1,104 @@
+name: OrangeFox - Build (Automated for Tecno KI8)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build OFRP for Tecno KI8
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MANIFEST_BRANCH: '12.1'
+      DEVICE_TREE: 'https://github.com/Yash499-cloud/Il2cppdumper'
+      DEVICE_TREE_BRANCH: 'main'
+      DEVICE_PATH: 'device/tecno/KI8'
+      DEVICE_NAME: 'KI8'
+      PRODUCT_NAME: 'omni_TECNO_KI8'
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Clean-up
+      uses: rokibhasansagar/slimhub_actions@main
+
+    - name: Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+      
+    - name: Build Environment
+      run: |
+        sudo apt update
+        sudo apt -y upgrade
+        git clone https://gitlab.com/OrangeFox/misc/scripts scripts_env
+        cd scripts_env
+        sudo bash setup/android_build_env.sh
+      
+    - name: Set-up Manifest
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+        cd ${GITHUB_WORKSPACE}/OrangeFox
+        git config --global user.name "Samuel Kendall"
+        git config --global user.email "kinguser981@gmail.com"
+        git clone https://gitlab.com/OrangeFox/sync.git
+        cd sync
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+
+    - name: Clone Device Tree
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        # Cloning to correct path
+        git clone ${{ env.DEVICE_TREE }} -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        
+        # AUTO-REPAIR: Files ko theek karna
+        cd ./${{ env.DEVICE_PATH }}
+        # Obsolete lines delete karna
+        sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk || true
+        # Agar vendorsetup.sh galti se clone hui to delete karna
+        rm -f vendorsetup.sh || true
+        
+        echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+    - name: Building OrangeFox
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        # environment load karna
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        
+        echo "--- RUNNING LUNCH ---"
+        # Lunch with detailed error capture
+        lunch ${{ env.PRODUCT_NAME }}-eng || { echo "LUNCH_FAILED=true" >> $GITHUB_ENV; lunch ${{ env.PRODUCT_NAME }}-eng; exit 1; }
+        
+        echo "--- STARTING MKA ---"
+        mka adbd recoveryimage -j$(nproc --all)
+
+    - name: Check and Prepare Files
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/
+        if [ -d "TECNO_KI8" ]; then cd TECNO_KI8; elif [ -d "KI8" ]; then cd KI8; else exit 1; fi
+        
+        if [ -f OrangeFox*.img ]; then
+            echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
+            cp OrangeFox*.img recovery.img
+            echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
+            wget https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
+            zip -ur recovery-installer.zip recovery.img
+        else
+            echo "Build failed: Image not found."
+            exit 1
+        fi
+
+    - name: Upload to Release
+      if: env.CHECK_IMG_IS_OK == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ env.FILE_PATH }}/recovery.img
+          ${{ env.FILE_PATH }}/recovery-installer.zip
+          ${{ env.FILE_PATH }}/OrangeFox*.zip
+        name: Unofficial OrangeFox for KI8 // ${{ env.COMMIT_ID }}
+        tag_name: ${{ github.run_id }}
