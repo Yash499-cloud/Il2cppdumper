@@ -7,7 +7,6 @@ jobs:
   build:
     name: Build OFRP for Tecno KI8
     runs-on: ubuntu-latest
-    if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
@@ -57,11 +56,16 @@ jobs:
     - name: Building OrangeFox
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        # Script ko crash hone se rokne ke liye set +e
+        set +e
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
-        # Lunch target (Obsolete HAL hatne ke baad ye pass ho jayega)
+        
+        echo "--- Starting Lunch ---"
         lunch ${{ env.PRODUCT_NAME }}-eng
-        mka adbd recoveryimage
+        
+        echo "--- Starting Build ---"
+        mka adbd recoveryimage -j$(nproc --all)
 
     - name: Check and Prepare Files
       run: |
@@ -72,8 +76,6 @@ jobs:
             echo "CHECK_IMG_IS_OK=true" >> $GITHUB_ENV
             cp OrangeFox*.img recovery.img
             echo "FILE_PATH=$(pwd)" >> $GITHUB_ENV
-            
-            # Download installer
             wget https://github.com/kinguser981/recovery-installer/releases/download/11256427880/recovery-installer.zip
             zip -ur recovery-installer.zip recovery.img
         else
@@ -88,10 +90,5 @@ jobs:
         files: |
           ${{ env.FILE_PATH }}/recovery.img
           ${{ env.FILE_PATH }}/recovery-installer.zip
-          ${{ env.FILE_PATH }}/OrangeFox*.zip
         name: Unofficial OrangeFox for KI8 // ${{ env.COMMIT_ID }}
         tag_name: ${{ github.run_id }}
-        body: |
-          Device: Tecno KI8
-          Target: ${{ env.PRODUCT_NAME }}
-          Commit: ${{ env.COMMIT_ID }}
