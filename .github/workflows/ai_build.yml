@@ -1,6 +1,6 @@
 name: OrangeFox - Build (Automated for Tecno KI8)
 on:
-  workflow_dispatch:  # Ye line button aur GH CLI ke liye zaroori hai
+  workflow_dispatch:
   push:
     branches:
       - main
