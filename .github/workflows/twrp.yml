@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Final-Tree-Fix)
+name: OrangeFox - Build KI8 (Full-Log-Uploader)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
@@ -19,99 +18,86 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Environment Setup
+    - name: Cleanup & Setup
       run: |
-        echo "::group::🛠️ Installing Tools"
-        sudo apt update && sudo apt install -y git python3 bc build-essential zip unzip curl libncurses5 rsync wget
+        sudo apt update && sudo apt install -y git python3 bc build-essential zip unzip curl rsync wget libssl-dev
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts && sudo bash setup/android_build_env.sh
-        echo "::endgroup::"
 
-    - name: Sync Source
+    - name: Sync & Tree Prep
       run: |
-        echo "::group::🔄 OrangeFox Sync"
         mkdir -p work && cd work
-        git config --global user.name "Yash499"
-        git config --global user.email "yash@example.com"
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_${{ env.MANIFEST_BRANCH }}
-        echo "::endgroup::"
-
-    - name: Tree Extraction & Path Auto-Correction
-      run: |
-        echo "::group::🌳 Smart Tree Fixer"
-        cd work/fox_${{ env.MANIFEST_BRANCH }}
-        mkdir -p ${{ env.DEVICE_PATH }}
         
-        # Clone repo
+        cd ../fox_${{ env.MANIFEST_BRANCH }}
+        mkdir -p ${{ env.DEVICE_PATH }}
         git clone https://github.com/Yash499-cloud/Recovery -b main ./${{ env.DEVICE_PATH }}
         
+        # Extraction logic
         cd ${{ env.DEVICE_PATH }}
         if [ -f "tecno_tree.zip" ]; then
-          echo "📦 Zip file detected! Deep Extracting..."
-          unzip tecno_tree.zip
-          rm tecno_tree.zip
-          
-          # Logic: Dhoondho BoardConfig.mk kahan hai aur sari files ko root par lao
+          unzip -o tecno_tree.zip && rm tecno_tree.zip
           ACTUAL_FOLDER=$(find . -name "BoardConfig.mk" -printf '%h\n' | head -n 1)
-          if [ "$ACTUAL_FOLDER" != "." ] && [ -n "$ACTUAL_FOLDER" ]; then
-             echo "📂 Moving files from $ACTUAL_FOLDER to tree root..."
-             mv $ACTUAL_FOLDER/* .
-          fi
-          echo "✅ Extraction and Path Correction Complete"
+          if [ "$ACTUAL_FOLDER" != "." ] && [ -n "$ACTUAL_FOLDER" ]; then mv $ACTUAL_FOLDER/* . ; fi
         fi
 
-        # Final Verification before Build
-        cd ../../../ # Back to fox root
-        if [ -f "${{ env.DEVICE_PATH }}/BoardConfig.mk" ]; then
-          echo "✅ SUCCESS: BoardConfig.mk is now in the correct place."
-          # Screen Fixes
-          sed -i '/TARGET_SCREEN_HEIGHT/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
-          echo "TARGET_SCREEN_HEIGHT := 2460" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
-          echo "TARGET_SCREEN_WIDTH := 1080" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
-          echo "TW_THEME := portrait_hdpi" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
-        else
-          echo "❌ ERROR: Critical files still missing!"
-          ls -R ${{ env.DEVICE_PATH }}
-          exit 1
-        fi
-        echo "::endgroup::"
-
-    - name: Compilation
+    - name: Compilation (Capturing Logs)
       run: |
-        echo "🚀 Starting Build Process..."
         cd work/fox_${{ env.MANIFEST_BRANCH }}
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
         source build/envsetup.sh
         
-        # Comprehensive Lunch Fallback
+        # Try to lunch and capture output
         lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng || lunch ${{ env.DEVICE_NAME }}-eng
         
-        mka recoveryimage -j$(nproc --all)
+        # Building with log capture
+        mka recoveryimage -j$(nproc --all) 2>&1 | tee build_log.txt || true
+        
+        # Build fail ho ya pass, log ko root mein move karo upload ke liye
+        cp build_log.txt ${{ github.workspace }}/build_log.txt
 
-    - name: Artifact Check & Release
+    - name: Generate Direct Download Link
       if: always()
       run: |
-        echo "::group::📦 Finalizing Artifacts"
-        cd work/fox_${{ env.MANIFEST_BRANCH }}
-        OUT_DIR="out/target/product/${{ env.DEVICE_NAME }}"
-        if [ -d "$OUT_DIR" ]; then
-           mkdir -p ${{ github.workspace }}/final
-           find $OUT_DIR -name "OrangeFox*.img" -exec cp {} ${{ github.workspace }}/final/ \;
-           find $OUT_DIR -name "OrangeFox*.zip" -exec cp {} ${{ github.workspace }}/final/ \;
-           echo "BUILD_OK=true" >> $GITHUB_ENV
-        else
-           echo "❌ ERROR: Compilation failed. No image found."
-        fi
+        echo "::group::🔗 Direct Download Links"
+        # Log ko transfer.sh par upload kar raha hoon taaki direct link mile
+        LINK=$(curl --upload-file ${{ github.workspace }}/build_log.txt https://transfer.sh/build_log.txt)
+        echo "--------------------------------------------------"
+        echo "BUILD LOG DIRECT LINK: $LINK"
+        echo "--------------------------------------------------"
+        echo "link=$LINK" >> $GITHUB_ENV
         echo "::endgroup::"
 
-    - name: Upload to Release
+    - name: Upload Build Log to GitHub
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ env.DEVICE_NAME }}
+        path: ${{ github.workspace }}/build_log.txt
+
+    - name: Check Artifacts & Release
+      if: always()
+      run: |
+        cd work/fox_${{ env.MANIFEST_BRANCH }}
+        mkdir -p ${{ github.workspace }}/final
+        find out/target/product/ -name "OrangeFox*.img" -exec cp {} ${{ github.workspace }}/final/ \; 2>/dev/null || true
+        find out/target/product/ -name "OrangeFox*.zip" -exec cp {} ${{ github.workspace }}/final/ \; 2>/dev/null || true
+        
+        if [ "$(ls -A ${{ github.workspace }}/final)" ]; then
+           echo "BUILD_OK=true" >> $GITHUB_ENV
+        fi
+
+    - name: Release Final Build
       if: env.BUILD_OK == 'true'
       uses: softprops/action-gh-release@v2
       with:
         files: final/*
-        name: OrangeFox KI8 (Fixed-Tree) // ${{ github.run_id }}
+        name: OrangeFox KI8 Successful Build // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
-        
+        body: |
+          Build successful!
+          Download Log: ${{ env.link }}
+          
