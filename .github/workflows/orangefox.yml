@@ -50,12 +50,13 @@ jobs:
     - name: Clone Device Tree
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        # Cloning device tree
         git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Yash499-cloud/Il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
         
-        # Auto-Fix for any remaining obsolete variables
+        # Auto-Fix with safety check (|| true prevents exit code 2)
         cd ./${{ env.DEVICE_PATH }}
-        sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk
-        sed -i '/COMMON_LUNCH_CHOICES/d' vendorsetup.sh 2>/dev/null
+        sed -i '/PRODUCT_STATIC_BOOT_CONTROL_HAL/d' device.mk || true
+        rm -f vendorsetup.sh || true
         
         echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
@@ -66,14 +67,16 @@ jobs:
         export ALLOW_MISSING_DEPENDENCIES=true
         
         echo "--- Starting Lunch ---"
-        lunch ${{ env.PRODUCT_NAME }}-eng || { echo "Lunch failed"; exit 1; }
+        lunch ${{ env.PRODUCT_NAME }}-eng
         
         echo "--- Starting Build ---"
-        mka adbd recoveryimage -j$(nproc --all)
+        # Using -j8 to balance speed and memory
+        mka adbd recoveryimage -j8
 
     - name: Check and Prepare Files
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/
+        # Folder check
         if [ -d "TECNO_KI8" ]; then cd TECNO_KI8; elif [ -d "KI8" ]; then cd KI8; else exit 1; fi
         
         if [ -f OrangeFox*.img ]; then
