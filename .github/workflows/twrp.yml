@@ -1,4 +1,4 @@
-name: OrangeFox - Build KI8 (Zip-Auto-Extract)
+name: OrangeFox - Build KI8 (Final-Tree-Fix)
 
 on:
   workflow_dispatch:
@@ -19,21 +19,12 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: System Cleanup
-      run: |
-        echo "::group::🧹 Space Management"
-        docker image prune -a -f
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android
-        echo "✅ Disk Ready"
-        echo "::endgroup::"
-
     - name: Environment Setup
       run: |
-        echo "::group::🛠️ Installing Build Tools"
+        echo "::group::🛠️ Installing Tools"
         sudo apt update && sudo apt install -y git python3 bc build-essential zip unzip curl libncurses5 rsync wget
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts && sudo bash setup/android_build_env.sh
-        echo "✅ Environment Ready"
         echo "::endgroup::"
 
     - name: Sync Source
@@ -47,39 +38,41 @@ jobs:
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ../fox_${{ env.MANIFEST_BRANCH }}
         echo "::endgroup::"
 
-    - name: Tree Setup & Zip Extract Logic
+    - name: Tree Extraction & Path Auto-Correction
       run: |
-        echo "::group::🌳 Smart Tree Extraction"
+        echo "::group::🌳 Smart Tree Fixer"
         cd work/fox_${{ env.MANIFEST_BRANCH }}
         mkdir -p ${{ env.DEVICE_PATH }}
         
         # Clone repo
         git clone https://github.com/Yash499-cloud/Recovery -b main ./${{ env.DEVICE_PATH }}
         
-        # Check if it's a ZIP file inside the repo
-        if [ -f "${{ env.DEVICE_PATH }}/tecno_tree.zip" ]; then
-          echo "📦 Zip file detected! Extracting..."
-          cd ${{ env.DEVICE_PATH }}
+        cd ${{ env.DEVICE_PATH }}
+        if [ -f "tecno_tree.zip" ]; then
+          echo "📦 Zip file detected! Deep Extracting..."
           unzip tecno_tree.zip
-          # Research: Zip ke andar folder ho sakta hai ya sidha files. 
-          # Agar zip ke andar koi folder nikla, toh files ko root par move karo.
-          if [ -d "Recovery-main" ]; then mv Recovery-main/* . && rm -rf Recovery-main; fi
           rm tecno_tree.zip
-          cd ../../../
-          echo "✅ Extraction Complete"
+          
+          # Logic: Dhoondho BoardConfig.mk kahan hai aur sari files ko root par lao
+          ACTUAL_FOLDER=$(find . -name "BoardConfig.mk" -printf '%h\n' | head -n 1)
+          if [ "$ACTUAL_FOLDER" != "." ] && [ -n "$ACTUAL_FOLDER" ]; then
+             echo "📂 Moving files from $ACTUAL_FOLDER to tree root..."
+             mv $ACTUAL_FOLDER/* .
+          fi
+          echo "✅ Extraction and Path Correction Complete"
         fi
 
-        # Verification
+        # Final Verification before Build
+        cd ../../../ # Back to fox root
         if [ -f "${{ env.DEVICE_PATH }}/BoardConfig.mk" ]; then
-          echo "✅ SUCCESS: BoardConfig.mk found at ${{ env.DEVICE_PATH }}"
-          # Apply Patches
+          echo "✅ SUCCESS: BoardConfig.mk is now in the correct place."
+          # Screen Fixes
           sed -i '/TARGET_SCREEN_HEIGHT/d' ${{ env.DEVICE_PATH }}/BoardConfig.mk
           echo "TARGET_SCREEN_HEIGHT := 2460" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
           echo "TARGET_SCREEN_WIDTH := 1080" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
           echo "TW_THEME := portrait_hdpi" >> ${{ env.DEVICE_PATH }}/BoardConfig.mk
         else
-          echo "❌ ERROR: Still can't find BoardConfig.mk!"
-          echo "Current directory structure of ${{ env.DEVICE_PATH }}:"
+          echo "❌ ERROR: Critical files still missing!"
           ls -R ${{ env.DEVICE_PATH }}
           exit 1
         fi
@@ -87,19 +80,21 @@ jobs:
 
     - name: Compilation
       run: |
-        echo "🚀 Starting MKA..."
+        echo "🚀 Starting Build Process..."
         cd work/fox_${{ env.MANIFEST_BRANCH }}
         export ALLOW_MISSING_DEPENDENCIES=true
         export LC_ALL=C
         source build/envsetup.sh
         
-        lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng
+        # Comprehensive Lunch Fallback
+        lunch twrp_${{ env.DEVICE_NAME }}-eng || lunch omni_${{ env.DEVICE_NAME }}-eng || lunch ${{ env.DEVICE_NAME }}-eng
+        
         mka recoveryimage -j$(nproc --all)
 
     - name: Artifact Check & Release
       if: always()
       run: |
-        echo "::group::📦 Finalizing"
+        echo "::group::📦 Finalizing Artifacts"
         cd work/fox_${{ env.MANIFEST_BRANCH }}
         OUT_DIR="out/target/product/${{ env.DEVICE_NAME }}"
         if [ -d "$OUT_DIR" ]; then
@@ -108,15 +103,15 @@ jobs:
            find $OUT_DIR -name "OrangeFox*.zip" -exec cp {} ${{ github.workspace }}/final/ \;
            echo "BUILD_OK=true" >> $GITHUB_ENV
         else
-           echo "❌ ERROR: Compilation failed."
+           echo "❌ ERROR: Compilation failed. No image found."
         fi
         echo "::endgroup::"
 
-    - name: Release
+    - name: Upload to Release
       if: env.BUILD_OK == 'true'
       uses: softprops/action-gh-release@v2
       with:
         files: final/*
-        name: OrangeFox KI8 (Auto-Extracted) // ${{ github.run_id }}
+        name: OrangeFox KI8 (Fixed-Tree) // ${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         
