@@ -261,27 +261,38 @@ jobs:
       - name: Build OrangeFox Recovery
         run: |
           cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+          
+          echo "🚀 Setting up build environment..."
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
           export LC_ALL=C
+          
           echo "📱 Available targets:"
           print_lunch_menu
-          echo "🔨 Running lunch command..."
-          lunch ${{ env.PRODUCT_NAME }}-eng 2>&1 | tee lunch.log
+          
+          echo "🔨 Running lunch command with full debug..."
+          # Direct product name use kar rahe hain variable ki jagah
+          lunch omni_TECNO_KI8-eng 2>&1 | tee lunch.log
+          
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ Lunch failed! Check lunch.log:"
+            echo "❌ Lunch failed! Puri lunch.log niche di gayi hai:"
             cat lunch.log
+            echo "⚙️ Alternative method try kar rahe hain..."
+            . build/envsetup.sh
+            lunch
             exit 1
           fi
+          
           echo "⚙️ Starting build..."
           if [[ "${{ github.event.inputs.build_type }}" == "boot" ]]; then
             mka bootimage -j$(nproc --all) 2>&1 | tee build.log
           else
             mka recoveryimage -j$(nproc --all) 2>&1 | tee build.log
           fi
+          
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ Build failed! Last 50 lines of build.log:"
+            echo "❌ Build failed! Akhri 50 lines build.log se:"
             tail -50 build.log
             exit 1
           fi
