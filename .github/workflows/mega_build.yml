@@ -46,27 +46,36 @@ jobs:
 
     - name: Extract Device Tree Zip
       run: |
+        # Sahi directory mein jao
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        
+        # Device path folder banao
         mkdir -p ${{ env.DEVICE_PATH }}
-        # Aapki repo se zip copy karke extract karna
-        unzip ${GITHUB_WORKSPACE}/tecno_tree.zip -d ./${| env.DEVICE_PATH }}
-        echo "✅ Device Tree Extracted to ${{ env.DEVICE_PATH }}"
-        ls -R ./${{ env.DEVICE_PATH }}
+        
+        # Zip extract karo (Syntax Fix)
+        unzip ${GITHUB_WORKSPACE}/tecno_tree.zip -d ${{ env.DEVICE_PATH }}
+        
+        echo "✅ Device Tree Extracted Successfully!"
+        # Files check karne ke liye
+        ls -F ${{ env.DEVICE_PATH }}
 
     - name: Building OrangeFox (Android 13 Logic)
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
         source build/envsetup.sh
+        
         # Android 13 specific flags
         export ALLOW_MISSING_DEPENDENCIES=true
         export FOX_VERSION="R11.1_A13"
         export LC_ALL=C
         
+        # Lunch command
         lunch omni_${{ env.DEVICE_NAME }}-eng
-        make clean
+        
+        # Build shuru (Log ke saath)
         mka adbd ${{ env.BUILD_TARGET }}image -j$(nproc --all) 2>&1 | tee build.log
 
-    - name: Check and Upload to Release
+    - name: Check and Rename Recovery
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}
         if [ -f recovery.img ] || [ -f OrangeFox*.img ]; then
@@ -76,7 +85,14 @@ jobs:
             echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
         fi
 
-    - name: Upload Artifacts
+    - name: Upload Logs if Build Fails
+      if: env.BUILD_SUCCESS == 'false'
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-failed
+        path: ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/build.log
+
+    - name: Create Release and Upload
       uses: softprops/action-gh-release@v1
       if: env.BUILD_SUCCESS == 'true'
       with:
@@ -85,4 +101,9 @@ jobs:
           ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip
         name: OrangeFox Unofficial Android 13 for ${{ env.DEVICE_NAME }}
         tag_name: ${{ github.run_id }}
-        
+        body: |
+          ### Build Successful!
+          - Device: Tecno KI8
+          - Android Version: 13
+          - Status: Unofficial
+          
