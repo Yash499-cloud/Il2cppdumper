@@ -7,23 +7,40 @@ jobs:
   extract:
     runs-on: ubuntu-latest
     steps:
-      - name: Cleanup & Sync
+      - name: Maximize Storage & Setup Swap
         run: |
-          # Sirf zaroori folder sync karenge (Storage bachane ke liye)
-          mkdir ~/fox && cd ~/fox
-          repo init --depth=1 -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1
-          # Hum sirf prebuilts aur tools sync karenge jo build mein kaam aate hain
-          repo sync -c -j$(nproc --all) --no-clone-bundle --no-tags
+          # Faltu software delete karke space banao
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          # 8GB Swap file banana (RAM boost ke liye)
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
 
-      - name: Zip Essential Files
+      - name: Install Repo Tool
+        run: |
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+rx ~/bin/repo
+          # Path set karna taaki 'repo' command kaam kare
+          sudo ln -sf ~/bin/repo /usr/bin/repo
+
+      - name: Sync & Extract
+        run: |
+          mkdir ~/fox && cd ~/fox
+          git config --global user.email "harsh@kumar.com"
+          git config --global user.name "Harsh Kumar"
+          
+          # Initialize
+          repo init --depth=1 -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1
+          
+          # Sync (Ab 'repo command not found' nahi aayega)
+          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+          
+      - name: Zip & Upload
         run: |
           cd ~/fox
-          # Build tools aur prebuilts ko zip karo (Yahi sabse badi hoti hain)
-          zip -r9 build_essentials.zip build/envsetup.sh prebuilts/build-tools vendor/omni/build/tools
-          
-      - name: Upload to Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Essential-Files
-          path: ~/fox/build_essentials.zip
+          zip -r9 build_essentials.zip build/envsetup.sh prebuilts/build-tools
+          # Yahan aap apna tecno_tree.zip bhi add kar sakte ho
           
