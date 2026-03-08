@@ -7,40 +7,58 @@ jobs:
   extract:
     runs-on: ubuntu-latest
     steps:
-      - name: Maximize Storage & Setup Swap
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Cleanup and Mega Swap
         run: |
-          # Faltu software delete karke space banao
+          # Pehle purana swap band karo agar hai toh
+          sudo swapoff -a || true
+          
+          # Faltu storage saaf karo
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          # 8GB Swap file banana (RAM boost ke liye)
-          sudo fallocate -l 8G /swapfile
+          
+          # Naya 10GB Swap banao (Fresh start)
+          sudo dd if=/dev/zero of=/swapfile bs=1M count=10240
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
-      - name: Install Repo Tool
+      - name: Install Repo Tool Properly
         run: |
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+rx ~/bin/repo
-          # Path set karna taaki 'repo' command kaam kare
-          sudo ln -sf ~/bin/repo /usr/bin/repo
+          # Path ko permanently set karo session ke liye
+          echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Sync & Extract
+      - name: Sync OrangeFox Source
         run: |
-          mkdir ~/fox && cd ~/fox
+          mkdir -p ~/fox && cd ~/fox
           git config --global user.email "harsh@kumar.com"
           git config --global user.name "Harsh Kumar"
           
-          # Initialize
-          repo init --depth=1 -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1
+          # Initialize depth 1 (Space bachane ke liye)
+          ~/bin/repo init --depth=1 -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1
           
-          # Sync (Ab 'repo command not found' nahi aayega)
-          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-          
-      - name: Zip & Upload
+          # Sync shuru (Is baar fail nahi hoga)
+          ~/bin/repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+
+      - name: Unzip Your Tree
         run: |
-          cd ~/fox
-          zip -r9 build_essentials.zip build/envsetup.sh prebuilts/build-tools
-          # Yahan aap apna tecno_tree.zip bhi add kar sakte ho
+          # Agar tecno_tree.zip aapki repo mein hai toh:
+          mkdir -p ~/fox/device/tecno/KI8
+          if [ -f "tecno_tree.zip" ]; then
+            unzip tecno_tree.zip -d ~/fox/device/tecno/KI8
+            echo "✅ Tree Unzipped Successfully"
+          else
+            echo "❌ Error: tecno_tree.zip nahi mili repo mein!"
+            exit 1
+          fi
+
+      - name: Final Check & Storage Status
+        run: |
+          ls -R ~/fox/device/tecno/KI8
+          df -h /
           
