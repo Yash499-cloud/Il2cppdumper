@@ -44,6 +44,16 @@ jobs:
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
+    - name: 🔍 Debug - Check tecno_tree.zip
+      run: |
+        echo "📂 Current directory: $(pwd)"
+        echo "📂 Files in workspace:"
+        ls -la ${GITHUB_WORKSPACE}/
+        echo "📂 File type of tecno_tree.zip:"
+        file ${GITHUB_WORKSPACE}/tecno_tree.zip || echo "❌ File not found!"
+        echo "📂 File size:"
+        wc -c ${GITHUB_WORKSPACE}/tecno_tree.zip || echo "❌ Cannot read file"
+
     - name: Extract Device Tree Zip
       run: |
         # Sahi directory mein jao
@@ -52,12 +62,25 @@ jobs:
         # Device path folder banao
         mkdir -p ${{ env.DEVICE_PATH }}
         
-        # Zip extract karo (Syntax Fix)
-        unzip ${GITHUB_WORKSPACE}/tecno_tree.zip -d ${{ env.DEVICE_PATH }}
+        # Pehle check karo ki file exist karti hai
+        if [ ! -f ${GITHUB_WORKSPACE}/tecno_tree.zip ]; then
+          echo "❌ tecno_tree.zip not found!"
+          exit 1
+        fi
+        
+        # Try with -O flag (force overwrite) and -q (quiet)
+        echo "📦 Extracting tecno_tree.zip..."
+        unzip -o -q ${GITHUB_WORKSPACE}/tecno_tree.zip -d ${{ env.DEVICE_PATH }} || {
+          echo "❌ unzip failed. Trying alternative method..."
+          # Agar zip corrupt hai to 7z use karo
+          sudo apt install -y p7zip-full
+          7z x ${GITHUB_WORKSPACE}/tecno_tree.zip -o${{ env.DEVICE_PATH }} -y
+        }
         
         echo "✅ Device Tree Extracted Successfully!"
         # Files check karne ke liye
-        ls -F ${{ env.DEVICE_PATH }}
+        echo "📂 Extracted files:"
+        ls -la ${{ env.DEVICE_PATH }}
 
     - name: Building OrangeFox (Android 13 Logic)
       run: |
@@ -106,4 +129,3 @@ jobs:
           - Device: Tecno KI8
           - Android Version: 13
           - Status: Unofficial
-          
