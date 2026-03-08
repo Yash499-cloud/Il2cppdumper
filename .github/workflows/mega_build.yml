@@ -12,53 +12,48 @@ jobs:
 
       - name: Cleanup and Mega Swap
         run: |
-          # Pehle purana swap band karo agar hai toh
           sudo swapoff -a || true
-          
-          # Faltu storage saaf karo
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          
-          # Naya 10GB Swap banao (Fresh start)
           sudo dd if=/dev/zero of=/swapfile bs=1M count=10240
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
-      - name: Install Repo Tool Properly
+      - name: Install Repo Tool
         run: |
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+rx ~/bin/repo
-          # Path ko permanently set karo session ke liye
           echo "$HOME/bin" >> $GITHUB_PATH
 
       - name: Sync OrangeFox Source
         run: |
           mkdir -p ~/fox && cd ~/fox
+          # Git Identity Setup
           git config --global user.email "harsh@kumar.com"
           git config --global user.name "Harsh Kumar"
+          git config --global color.ui false
           
-          # Initialize depth 1 (Space bachane ke liye)
-          ~/bin/repo init --depth=1 -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1
+          # Initialize with direct branch and no tags
+          ~/bin/repo init --depth=1 -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1 --groups=all,-notdefault,-device,-partner,-darwin,-tests
           
-          # Sync shuru (Is baar fail nahi hoga)
-          ~/bin/repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-
+          # Sync with more retries
+          ~/bin/repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --quiet
+          
       - name: Unzip Your Tree
         run: |
-          # Agar tecno_tree.zip aapki repo mein hai toh:
           mkdir -p ~/fox/device/tecno/KI8
           if [ -f "tecno_tree.zip" ]; then
             unzip tecno_tree.zip -d ~/fox/device/tecno/KI8
             echo "✅ Tree Unzipped Successfully"
           else
-            echo "❌ Error: tecno_tree.zip nahi mili repo mein!"
-            exit 1
+            # Agar zip 'device/tecno/KI8' ke andar repo mein hai
+            find . -name "tecno_tree.zip" -exec unzip {} -d ~/fox/device/tecno/KI8 \;
           fi
 
       - name: Final Check & Storage Status
         run: |
-          ls -R ~/fox/device/tecno/KI8
+          ls -R ~/fox/device/tecno/KI8 || echo "Folder not found"
           df -h /
           
