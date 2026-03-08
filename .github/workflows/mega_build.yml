@@ -1,59 +1,100 @@
-name: Extract Build Files
+name: OrangeFox - Build (Automated for Tecno KI8)
 
 on:
   workflow_dispatch:
 
 jobs:
-  extract:
+  build:
+    name: Build OFRP for Tecno KI8
     runs-on: ubuntu-latest
+    if: github.event.repository.owner.id == github.event.sender.id
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MANIFEST_BRANCH: '12.1'
+      DEVICE_TREE: 'https://github.com/${{ github.repository_owner }}/il2cppdumper'
+      DEVICE_TREE_BRANCH: 'fox_12.1'
+      DEVICE_PATH: 'device/tecno/KI8'
+      DEVICE_NAME: 'KI8'
+      BUILD_TARGET: 'recovery'
+    permissions:
+      contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v3
 
-      - name: Cleanup and Mega Swap
-        run: |
-          sudo swapoff -a || true
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          sudo dd if=/dev/zero of=/swapfile bs=1M count=10240
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
+    - name: Clean-up & Space Maximize
+      uses: rokibhasansagar/slimhub_actions@main
 
-      - name: Install Repo Tool
-        run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+rx ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
+    - name: Swap Space (24GB for Heavy Compiling)
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+      
+    - name: Build Environment
+      run: |
+        sudo apt update
+        git clone https://gitlab.com/OrangeFox/misc/scripts
+        cd scripts
+        sudo bash setup/android_build_env.sh
+      
+    - name: Set-up Manifest & Sync
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+        cd ${GITHUB_WORKSPACE}/OrangeFox
+        git config --global user.name "Harsh Kumar"
+        git config --global user.email "kinguser981@gmail.com"
+        git clone https://gitlab.com/OrangeFox/sync.git
+        cd sync
+        ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-      - name: Sync OrangeFox Source
-        run: |
-          mkdir -p ~/fox && cd ~/fox
-          # Git Identity Setup
-          git config --global user.email "harsh@kumar.com"
-          git config --global user.name "Harsh Kumar"
-          git config --global color.ui false
-          
-          # Initialize with direct branch and no tags
-          ~/bin/repo init --depth=1 -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1 --groups=all,-notdefault,-device,-partner,-darwin,-tests
-          
-          # Sync with more retries
-          ~/bin/repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --quiet
-          
-      - name: Unzip Your Tree
-        run: |
-          mkdir -p ~/fox/device/tecno/KI8
-          if [ -f "tecno_tree.zip" ]; then
-            unzip tecno_tree.zip -d ~/fox/device/tecno/KI8
-            echo "✅ Tree Unzipped Successfully"
-          else
-            # Agar zip 'device/tecno/KI8' ke andar repo mein hai
-            find . -name "tecno_tree.zip" -exec unzip {} -d ~/fox/device/tecno/KI8 \;
-          fi
+    - name: Clone Device Tree
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        git clone https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository_owner }}/il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
+        cd ${{ env.DEVICE_PATH }}
+        echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-      - name: Final Check & Storage Status
-        run: |
-          ls -R ~/fox/device/tecno/KI8 || echo "Folder not found"
-          df -h /
+    - name: Building OrangeFox (With Log Capture)
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        # Lunch and Build with output saved to log file
+        lunch omni_${{ env.DEVICE_NAME }}-eng
+        make clean
+        mka adbd ${{ env.BUILD_TARGET }}image -j$(nproc --all) 2>&1 | tee build.log
+
+    - name: Check Build Status
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}
+        if [ -f recovery.img ] || [ -f OrangeFox*.img ]; then
+            echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
+            # Rename for consistent uploading
+            [ -f OrangeFox*.img ] && mv OrangeFox*.img recovery.img || echo "Already named recovery.img"
+        else
+            echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
+        fi
+
+    - name: Upload Logs if Build Fails
+      if: env.BUILD_SUCCESS == 'false'
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs-failed
+        path: ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/build.log
+
+    - name: Create Release and Upload Files
+      if: env.BUILD_SUCCESS == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/recovery.img
+          ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip
+        name: OrangeFox Unofficial for ${{ env.DEVICE_NAME }} (${{ env.COMMIT_ID }})
+        tag_name: ${{ github.run_id }}
+        body: |
+          ### Build Successful!
+          - **Device:** Tecno KI8
+          - **Date:** ${{ github.event.head_commit.timestamp }}
+          - **Commit:** ${{ env.COMMIT_ID }}
+          - **Status:** Unofficial Build
           
