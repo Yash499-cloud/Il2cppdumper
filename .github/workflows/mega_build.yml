@@ -1,4 +1,4 @@
-name: OrangeFox - Build (Automated for Tecno KI8)
+name: OrangeFox - Build (Android 13 Support)
 
 on:
   workflow_dispatch:
@@ -7,94 +7,82 @@ jobs:
   build:
     name: Build OFRP for Tecno KI8
     runs-on: ubuntu-latest
-    if: github.event.repository.owner.id == github.event.sender.id
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MANIFEST_BRANCH: '12.1'
-      DEVICE_TREE: 'https://github.com/${{ github.repository_owner }}/il2cppdumper'
-      DEVICE_TREE_BRANCH: 'fox_12.1'
       DEVICE_PATH: 'device/tecno/KI8'
       DEVICE_NAME: 'KI8'
       BUILD_TARGET: 'recovery'
     permissions:
       contents: write
     steps:
-    - name: Checkout
+    - name: Checkout Repo
       uses: actions/checkout@v3
 
     - name: Clean-up & Space Maximize
       uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Swap Space (24GB for Heavy Compiling)
+    - name: Swap Space (24GB)
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 24
       
-    - name: Build Environment
+    - name: Build Environment Setup
       run: |
         sudo apt update
         git clone https://gitlab.com/OrangeFox/misc/scripts
         cd scripts
         sudo bash setup/android_build_env.sh
       
-    - name: Set-up Manifest & Sync
+    - name: Sync OrangeFox Source
       run: |
         mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
         cd ${GITHUB_WORKSPACE}/OrangeFox
         git config --global user.name "Harsh Kumar"
-        git config --global user.email "kinguser981@gmail.com"
+        git config --global user.email "harsh@kumar.com"
         git clone https://gitlab.com/OrangeFox/sync.git
         cd sync
         ./orangefox_sync.sh --branch ${{ env.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
 
-    - name: Clone Device Tree
+    - name: Extract Device Tree Zip
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
-        git clone https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository_owner }}/il2cppdumper.git -b ${{ env.DEVICE_TREE_BRANCH }} ./${{ env.DEVICE_PATH }}
-        cd ${{ env.DEVICE_PATH }}
-        echo "COMMIT_ID=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+        mkdir -p ${{ env.DEVICE_PATH }}
+        # Aapki repo se zip copy karke extract karna
+        unzip ${GITHUB_WORKSPACE}/tecno_tree.zip -d ./${| env.DEVICE_PATH }}
+        echo "✅ Device Tree Extracted to ${{ env.DEVICE_PATH }}"
+        ls -R ./${{ env.DEVICE_PATH }}
 
-    - name: Building OrangeFox (With Log Capture)
+    - name: Building OrangeFox (Android 13 Logic)
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}
         source build/envsetup.sh
+        # Android 13 specific flags
         export ALLOW_MISSING_DEPENDENCIES=true
-        # Lunch and Build with output saved to log file
+        export FOX_VERSION="R11.1_A13"
+        export LC_ALL=C
+        
         lunch omni_${{ env.DEVICE_NAME }}-eng
         make clean
         mka adbd ${{ env.BUILD_TARGET }}image -j$(nproc --all) 2>&1 | tee build.log
 
-    - name: Check Build Status
+    - name: Check and Upload to Release
       run: |
         cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}
         if [ -f recovery.img ] || [ -f OrangeFox*.img ]; then
+            [ -f OrangeFox*.img ] && mv OrangeFox*.img recovery.img
             echo "BUILD_SUCCESS=true" >> $GITHUB_ENV
-            # Rename for consistent uploading
-            [ -f OrangeFox*.img ] && mv OrangeFox*.img recovery.img || echo "Already named recovery.img"
         else
             echo "BUILD_SUCCESS=false" >> $GITHUB_ENV
         fi
 
-    - name: Upload Logs if Build Fails
-      if: env.BUILD_SUCCESS == 'false'
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs-failed
-        path: ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/build.log
-
-    - name: Create Release and Upload Files
-      if: env.BUILD_SUCCESS == 'true'
+    - name: Upload Artifacts
       uses: softprops/action-gh-release@v1
+      if: env.BUILD_SUCCESS == 'true'
       with:
         files: |
           ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/recovery.img
           ${{ github.workspace }}/OrangeFox/fox_${{ env.MANIFEST_BRANCH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip
-        name: OrangeFox Unofficial for ${{ env.DEVICE_NAME }} (${{ env.COMMIT_ID }})
+        name: OrangeFox Unofficial Android 13 for ${{ env.DEVICE_NAME }}
         tag_name: ${{ github.run_id }}
-        body: |
-          ### Build Successful!
-          - **Device:** Tecno KI8
-          - **Date:** ${{ github.event.head_commit.timestamp }}
-          - **Commit:** ${{ env.COMMIT_ID }}
-          - **Status:** Unofficial Build
-          
+        
